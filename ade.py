@@ -14,7 +14,6 @@ import time
 USERNAME_DEFAULT = ""
 PASSWORD_DEFAULT = ""
 USERS_FILE = "users.txt"
-USERS_LOWER_FILE = "users-lower.txt"
 
 # Centralized Status Printing 
 def print_status(message):
