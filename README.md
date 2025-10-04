@@ -15,7 +15,7 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 ---
 
 ## Initial Access & Credential Attacks
-* **User Spraying:** User Spraying: If no credentials are provided, the script tries `user:user` logins from `users.txt`, then retries using lowercase variants.
+* **User Spraying:** If no credentials are provided, the script tries `user:user` logins from `users.txt`, then retries using lowercase variants.
 * **AS-REP Roasting:** Uses the generated username list to find accounts with Kerberos pre-authentication disabled.
 * **Kerberoasting:** Searches for Service Principal Names (SPNs) and requests service TGS tickets for those SPNs.
 * **Auto Kerberos Switch:** Detects when **NTLM negotiation fails** during Kerberoasting. The script automatically enables the Kerberos flag (`-k`) and restarts the entire enumeration loop with Kerberos authentication enabled.
