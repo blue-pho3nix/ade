@@ -358,14 +358,6 @@ def section_1_ldap_discovery(r, u, p, k):
 
     if not output or not output.strip():
         print_status("\n[*] No descriptions found in LDAP results.")
-    # else:
-    #     # print deduped AWK output (AWK already dedupes usernames, but keep this safe)
-    #     seen_desc = set()
-    #     for L in output.splitlines():
-    #         if L in seen_desc:
-    #             continue
-    #         seen_desc.add(L)
-    #         print(L)
 
     # Gather usernames (sAMAccountName)
     cmd_check_users = (
