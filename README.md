@@ -31,7 +31,7 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 
 ---
 
-## Install Dependancies
+## Install Dependencies
 
 ### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec)
 
@@ -45,12 +45,12 @@ pipx install certipy-ad impacket bloodyAD git+https://github.com/Pennyw0rth/NetE
 
 ## Usage
 
-Without Credendials
+Without Credentials
 ```
 python ade.py -r <box-ip>
 ```
 
-With Credendials
+With Credentials
 ```
 python ade.py -r <box-ip> -u <user> -p <password> 
 ```
