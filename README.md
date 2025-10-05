@@ -36,7 +36,7 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 ### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec)
 
 ```
-sudo apt install pipx git
+sudo apt update && sudo apt install pipx git
 pipx ensurepath
 pipx install certipy-ad impacket bloodyAD git+https://github.com/Pennyw0rth/NetExec
 ```
