@@ -106,7 +106,7 @@ def verify_credentials(r, username, password, fqdn=None, domain=None, timeout=20
     if not username or not password:
         return "no-creds"
 
-    print_status("\n[*] Verifying provided credentials before continuing (Kerberos-first)...")
+    print_status("\n[*] Verifying provided credentials before continuing...")
 
     # Kerberos-capable probe using GetUserSPNs.py when we have fqdn+domain
     if fqdn and domain:
@@ -146,13 +146,18 @@ def verify_credentials(r, username, password, fqdn=None, domain=None, timeout=20
 
     # Fallback: run nxc smb check
     try:
-        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password]
+        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password, "--shares"]
         out, rc = run_command(smb_cmd, "Verify provided credentials (nxc smb check)", capture_output=True)
         text = (out or "").strip()
 
         if not text:
             print_status("\n[-] No output from nxc smb probe; treating as ambiguous.")
             return "ambiguous"
+
+        # explicit failures
+        if re.search(r'STATUS_ACCESS_DENIED|STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE|authentication failed', text, re.IGNORECASE):
+            print_status("\n[-] Provided credentials failed SMB authentication.")
+            return "bad"
 
         # explicit success markers
         if re.search(r'\[\+\]|Authenticated|STATUS_SUCCESS', text, re.IGNORECASE):
@@ -164,11 +169,7 @@ def verify_credentials(r, username, password, fqdn=None, domain=None, timeout=20
             print_status("\n[+] Kerberos/negotiation detected in SMB output — recommend Kerberos flows.")
             return "kerberos"
 
-        # explicit failures
-        if re.search(r'STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE|authentication failed', text, re.IGNORECASE):
-            print_status("\n[-] Provided credentials failed SMB authentication (STATUS_LOGON_FAILURE).")
-            return "bad"
-
+        
         # ambiguous but non-empty output
         print_status("\n[!] Credential verification returned ambiguous result; treating as ambiguous.")
         return "ambiguous"
@@ -254,7 +255,7 @@ def check_host_nmap(r, use_pn_fallback=True):
     output = run_nmap(command)
 
     if re.search(r"Host is up.*latency", output, re.IGNORECASE):
-        print_status(f"[+] Host {r} is active (ICMP latency confirmed).")
+        print_status(f"[+] Host {r} is active (nmap confirmed).")
         return True
 
     # --- ICMP ping fallback ---
@@ -510,7 +511,7 @@ def section_1_ldap_discovery(r, u, p, k):
             if needs_kerberos_rerun and (not u.strip() or not p.strip()):
                 print_status("[-] Kerberos authentication requires valid credentials (-u and -p).")
                 print_status("[-] Please rerun with:")
-                print(colored("    python script.py -r <box_ip> -u <user> -p <password>", "yellow"))
+                print(colored("    python script.py -r <box-ip> -u <user> -p <password>", "yellow"))
                 sys.exit(1)
 
 
@@ -1131,8 +1132,8 @@ def main():
         # Print the colored ASCII Art
         print(colored("\n" + ascii_art, "magenta")) # You can change "green" to any color
         print(colored(f"\n[CONFIG] Target IP:", "blue") + colored(f" {args.rhosts}", "white"))
-        print(colored(f"[CONFIG] Domain:", "blue") + colored(f"    {args.domain or 'Not Provided. Will be found.'}", "white"))
-        print(colored(f"[CONFIG] FQDN:", "blue") + colored(f"      {args.fqdn or 'Not Provided. Will be found.'}", "white"))
+        print(colored(f"[CONFIG] Domain:", "blue") + colored(f"    {args.domain or 'Not Provided. Script will attempt discovery.'}", "white"))
+        print(colored(f"[CONFIG] FQDN:", "blue") + colored(f"      {args.fqdn or 'Not Provided. Script will attempt discovery.'}", "white"))
         print(colored(f"[CONFIG] User:", "blue") + colored(f"      {args.username or 'Anonymous/Guest'}", "white"))
         print(colored(f"[CONFIG] Password:", "blue") + colored(f"  {args.password or 'Not Provided'}", "white"))
         print(colored(f"[CONFIG] Kerberos:", "blue") + colored(f"  {'Enabled' if args.kerberos else 'Disabled'}", "white"))
@@ -1185,7 +1186,7 @@ def main():
             run_authenticated_checks = True
             continue 
 
-
+        
         # SMB Enumeration
         section_2_smb_enum(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
