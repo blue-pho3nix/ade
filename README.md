@@ -33,11 +33,35 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 
 ## Install Dependencies
 
-### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec)
+### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec), [Nmap](https://nmap.org/), [termcolor](https://pypi.org/project/termcolor/)
 
 ```
-sudo apt update && sudo apt install pipx git
+sudo apt update && sudo apt install python3-termcolor
+```
+or 
+1.
+```
+python3 -m venv ade-venv
+```
+2.
+```
+source ade-venv/bin/activate
+```
+3.
+```
+python3 -m pip install termcolor
+```
+and
+1.
+```
+sudo apt update && sudo apt install pipx git nmap 
+```
+2.
+```
 pipx ensurepath
+```
+3.
+```
 pipx install certipy-ad impacket bloodyAD git+https://github.com/Pennyw0rth/NetExec
 ```
 
@@ -47,7 +71,7 @@ pipx install certipy-ad impacket bloodyAD git+https://github.com/Pennyw0rth/NetE
 
 Without Credentials
 ```
-python ade.py -r <box-ip>
+python3 ade.py -r <box-ip>
 ```
 
 With Credentials
