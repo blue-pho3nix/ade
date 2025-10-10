@@ -33,12 +33,12 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 
 ## Install Dependencies
 
-### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec), [Nmap](https://nmap.org/), [termcolor](https://pypi.org/project/termcolor/)
+### Install [termcolor](https://pypi.org/project/termcolor/)
 
 ```
 sudo apt update && sudo apt install python3-termcolor
 ```
-or 
+#### or 
 1.
 ```
 python3 -m venv ade-venv
@@ -51,7 +51,7 @@ source ade-venv/bin/activate
 ```
 python3 -m pip install termcolor
 ```
-and
+### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec), and [Nmap](https://nmap.org/)
 1.
 ```
 sudo apt update && sudo apt install pipx git nmap 
