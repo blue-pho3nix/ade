@@ -52,7 +52,15 @@ source ade-venv/bin/activate
 ```
 python3 -m pip install termcolor
 ```
-### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec),  [bloodhound-ce](http://github.com/dirkjanm/BloodHound.py),  and [Nmap](https://nmap.org/)
+### Install [Nmap](https://nmap.org/)
+
+Debian/Ubuntu
+```
+sudo apt update && sudo apt install nmap
+```
+
+### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec),  [bloodhound-ce](http://github.com/dirkjanm/BloodHound.py)
+
 1.
 ```
 sudo apt update && sudo apt install pipx git nmap 
