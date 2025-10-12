@@ -54,7 +54,6 @@ python3 -m pip install termcolor
 ```
 ### Install [Nmap](https://nmap.org/)
 
-Debian/Ubuntu
 ```
 sudo apt update && sudo apt install nmap
 ```
