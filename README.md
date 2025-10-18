@@ -101,7 +101,13 @@ python ade.py -r <box-ip> -u <user> -p <password>
 ---
 
 ## TODO
-- [ ] Beutify & reduce redunant printed messages
-- [ ] Get impacket-{tool}.py working for users that installed impacket via apt
-- [ ] Create usage videos
-- [ ] Etc...
+- [ ] Clean up and streamline printed messages to reduce redundancy
+- [ ] Make sure impacket-{tool}.py works for users who installed Impacket via apt
+- [ ] Record usage/tutorial videos
+- [ ] Add additional improvements and features as needed
+
+ 
+
+
+
+
