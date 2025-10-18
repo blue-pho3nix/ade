@@ -71,7 +71,7 @@ sudo apt update && sudo apt install pipx git
 pipx ensurepath
 ```
 **Step 3:** Install dependencies with `pipx`
-Install each tool into its own isolated environment.
+</br> Install each tool into its own isolated environment.
 ```
 pipx install certipy-ad
 pipx install impacket
