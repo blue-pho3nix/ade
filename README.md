@@ -1,35 +1,39 @@
 # ADE
+ADE is a Python script that automates Active Directory (AD) enumeration in lab environments, helping users on Hack The Box, Hack Smarter, TryHackMe, Proving Grounds, or exams like OSCP and CPTS streamline initial AD recon.
+> Note: </br> 
+> Wait at least 5 minutes after starting your lab before running the script to make sure `nxc --shares` works. 
+> </br> This is because some labs take longer to start up.
 
-<img width="1669" height="1203" alt="image" src="https://github.com/user-attachments/assets/70d7dbc9-b4ba-41c1-b3f1-89b95d25d9b5" />
+**Credentials Example**
+<img width="1249" height="1074" alt="image" src="https://github.com/user-attachments/assets/816fb3a5-ceeb-42c4-87fd-73bb058e136f" />
+
+**Kerberos Example**
+<img width="2402" height="1087" alt="image" src="https://github.com/user-attachments/assets/35abddba-b5c4-4080-99a9-ef939737d804" />
+
+**No Credentials Example**
+<img width="2142" height="788" alt="image" src="https://github.com/user-attachments/assets/e0798f22-ebc4-4b64-adb7-757232673f6b" />
 
 
-Active Directory enumeration and ADCS checks. 
-For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
-> Note: Let your lab start up for 5-10 minutes before running the script.
+## Key Actions
+### Initial Discovery & Host Setup
+- **Host Liveness Check:** Pings the target with nmap before starting to ensure the IP is correct and the host is online.
+- **/etc/hosts Management:** Discovers the target's FQDN and domain, then maps them in /etc/hosts for name resolution.
+- **Credential Validation:** Checks if supplied credentials are valid before launching deeper scans to avoid failed authenticated runs.
+- **User & description enumeration:** Collects sAMAccountName and description attributes via LDAP, and uses SMB-based RID cycling as a fallback to find accounts that LDAP queries might not return
 
----
+### Initial Access & Credential Attacks
+- **User Spraying:** If run without credentials, it attempts user:user logins for all discovered accounts.
+- **AS-REP Roasting:** Uses the generated users.txt to find accounts vulnerable to offline password cracking.
+- **Kerberoasting:** Searches for service accounts and requests their tickets, providing hashes to crack offline.
+- **Auto-Kerberos Switching:** Detects if Kerberos is required. If NTLM is unsupported, ADE enables Kerberos mode and restarts the workflow.
 
-## Initial Discovery & Host Resolution
-
-* **`/etc/hosts`:** Discovers the target's FQDN and domain. Makes sure the local `/etc/hosts` file is correctly mapped (`IP FQDN DOMAIN`), removing any incorrect IPs mapped to the domain/FQDN.
-* **Username Collection:** Gets valid users. Discovered usernames are saved to **`users.txt`**. The script checks for duplicates and adds lowercase users to the file.
-
----
-
-## Initial Access & Credential Attacks
-* **User Spraying:** If no credentials are provided, the script tries `user:user` logins from `users.txt`, then retries using lowercase variants.
-* **AS-REP Roasting:** Uses the generated username list to find accounts with Kerberos pre-authentication disabled.
-* **Kerberoasting:** Searches for Service Principal Names (SPNs) and requests service TGS tickets for those SPNs.
-* **Auto Kerberos Switch:** Detects when **NTLM negotiation fails** during Kerberoasting. The script automatically enables the Kerberos flag (`-k`) and restarts the entire enumeration loop with Kerberos authentication enabled.
-
----
-
-## Post-Authentication Enumeration & Checks
-
-* **SMB Enumeration:** Enumerates SMB shares (anonymous, guest, or authenticated) and attempts to download files using the spider_plus module. If no users.txt exists, the script will perform an initial RID brute to populate it (nxc smb).
-* **BloodHound Collection:** Runs the BloodHound collector to capture AD relationships and attack-path information. The collector is retried automatically on failure.
-* **Permission Check:** Uses **bloodyAD** to list objects the authenticated account can write to, pointing out escalation opportunities like writable group membership or modifiable user attributes.
-* **ADCS Vulnerability Check:** Runs ADCS discovery via LDAP and Certipy to identify vulnerable certificate templates and enrollment paths which could be abused for privilege escalation or identity impersonation.
+### Post-Authentication Enumeration
+- **Kerberos Ticket Management:** Gets a Kerberos ticket, saves it as a .ccache file you can reuse, and tells you the command to connect to SMB using that ticket.
+- **SMB share enumeration:** Enumerates SMB shares on the target, attempts access with anonymous/guest or supplied credentials, and reports access permissions (e.g., READ, WRITE).
+- **Intelligent retries:** Automatically retries SMB checks when they fail to ensure more reliable results.
+- **BloodHound collection:** Executes the BloodHound data collector, automatically retrying on failure, and outputs a ZIP that can be imported into BloodHound.
+- **Permission Checks:** Scans Active Directory with bloodyAD to find items your credentials can change (like user accounts or groups).
+- **ADCS checks:** Probes for Active Directory Certificate Services and then uses Certipy to find misconfigured templates that allow for privilege escalation.
 
 ---
 
@@ -40,16 +44,16 @@ For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
 ```
 sudo apt update && sudo apt install python3-termcolor
 ```
-#### or 
-1.
+#### OR
+**Step 1:** Create virutal environment 
 ```
 python3 -m venv ade-venv
 ```
-2.
+**Step 2:** Activate the virtual environment
 ```
 source ade-venv/bin/activate
 ```
-3.
+**Step 3:** Install the required Python package
 ```
 python3 -m pip install termcolor
 ```
@@ -61,31 +65,36 @@ sudo apt update && sudo apt install nmap
 
 ### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec),  [bloodhound-ce](http://github.com/dirkjanm/BloodHound.py)
 
-1.
+**Step 1:** Install `pipx` and `git`
 ```
 sudo apt update && sudo apt install pipx git
 ```
-2.
+**Step 2:** Ensure `pipx` is on your PATH
 ```
 pipx ensurepath
 ```
-3.
+**Step 3:** Install dependencies with `pipx`
+Install each tool into its own isolated environment.
 ```
-pipx install certipy-ad impacket bloodyAD git+https://github.com/Pennyw0rth/NetExec bloodhound-ce
+pipx install certipy-ad
+pipx install impacket
+pipx install bloodyAD
+pipx install git+https://github.com/Pennyw0rth/NetExec
+pipx install bloodhound-ce
 ```
 
 ## Usage
 
-Without Credentials
+Without credentials (anonymous/guest checks):
 ```
 python3 ade.py -r <box-ip>
 ```
 
-With Credentials
+With credentials (authenticated checks):
 ```
 python ade.py -r <box-ip> -u <user> -p <password> 
 ```
 
 ---
 
-NOTE: This is still under development. If you have any issues or requests reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
+> NOTE:  If you have any issues or requests, reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
