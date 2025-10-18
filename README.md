@@ -5,6 +5,7 @@
 
 Active Directory enumeration and ADCS checks. 
 For Labs: HTB, Hack Smarter, THM, CPTS, and OSCP
+> Note: Let your lab start up for 5-10 minutes before running the script.
 
 ---
 
