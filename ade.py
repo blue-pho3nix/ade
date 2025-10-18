@@ -525,7 +525,7 @@ def verify_credentials(r, username, password, fqdn, domain, timeout=20):
 
         # Kerberos / negotiation hints in SMB output
         if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
-            print_status("[+] Kerberos/negotiation detected in SMB output — recommend Kerberos flows.")
+            print_status("[+] Kerberos/negotiation detected in SMB output.")
             return "kerberos"
 
         
