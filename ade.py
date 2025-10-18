@@ -191,9 +191,6 @@ def check_dependencies():
     """
     Check for required external tools and exit if any are missing.
     
-    Args:
-        kerberos: Currently unused (kept for compatibility)
-    
     Required tools:
         - nmap: Network scanning
         - nxc (NetExec): SMB/LDAP enumeration
@@ -1303,7 +1300,7 @@ def bloodyad(r, u, p, k, d, f):
 
     # Construct command, using FQDN (f) as the host for Kerberos and DC IP (r) for the DC-IP.
     # Note: bloodyAD often requires FQDN for the host argument when using Kerberos.
-    cmd = f"bloodyAD -u {u} -p {p} {kerberos_auth} -d {d} --dc-ip {r} --host {f} get writable ".strip()
+    cmd = f"bloodyAD -u {u} -p {p} {kerberos_auth} -d {d} --dc-ip {r} --host {f} get writable".strip()
 
     run_command(cmd, "Check for writable objects with bloodyAD", is_shell_command=True)
 
@@ -1390,7 +1387,6 @@ def main():
             print(colored(f"[CONFIG] FQDN:", "blue") + colored(f"      {args.fqdn or 'Not Provided. Script will attempt discovery.'}", "white"))
             print(colored(f"[CONFIG] User:", "blue") + colored(f"      {args.username or 'Anonymous/Guest'}", "white"))
             print(colored(f"[CONFIG] Password:", "blue") + colored(f"  {args.password or 'Not Provided'}", "white"))
-            print(colored(f"[CONFIG] Kerberos:", "blue") + colored(f"  {'Enabled' if args.kerberos else 'Disabled'}", "white"))
 
         run_authenticated_checks = False
         if not args.kerberos:
