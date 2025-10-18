@@ -16,7 +16,7 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 - **Target Alive Checks:** Pings the target with nmap before starting to ensure the IP is correct and the host is online.
 - **/etc/hosts Management:** Discovers the target's FQDN and domain, then maps them in /etc/hosts for name resolution.
 - **Credential Validation:** Checks if supplied credentials are valid before launching deeper scans to avoid failed authenticated runs.
-- **User & description enumeration:** Collects sAMAccountName and description attributes via LDAP, and uses SMB-based RID cycling as a fallback to find accounts that LDAP queries might not return
+- **User & Description Enumeration:** Collects sAMAccountName and description attributes via LDAP, and uses SMB-based RID cycling as a fallback to find accounts that LDAP queries might not return
 
 ### Initial Access & Credential Attacks
 - **User Spraying:** If run without credentials, it attempts user:user logins for all discovered accounts.
@@ -26,11 +26,11 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 
 ### Post-Authentication Enumeration
 - **Kerberos Ticket Management:** Gets a Kerberos ticket, saves it as a .ccache file you can reuse, and tells you the command to connect to SMB using that ticket.
-- **SMB share enumeration:** Enumerates SMB shares on the target, attempts access with anonymous/guest or supplied credentials, and reports access permissions (e.g., READ, WRITE).
-- **Intelligent retries:** Automatically retries SMB checks when they fail to ensure more reliable results.
-- **BloodHound collection:** Executes the BloodHound data collector, automatically retrying on failure, and outputs a ZIP that can be imported into BloodHound.
+- **SMB Share Enumeration:** Enumerates SMB shares on the target, attempts access with anonymous/guest or supplied credentials, and reports access permissions (e.g., READ, WRITE).
+- **Intelligent Retries:** Automatically retries SMB checks when they fail to ensure more reliable results.
+- **BloodHound Collection:** Executes the BloodHound data collector, automatically retrying on failure, and outputs a ZIP that can be imported into BloodHound.
 - **Permission Checks:** Scans Active Directory with bloodyAD to find items your credentials can change (like user accounts or groups).
-- **ADCS checks:** Probes for Active Directory Certificate Services and then uses Certipy to find misconfigured templates that allow for privilege escalation.
+- **ADCS Checks:** Probes for Active Directory Certificate Services and then uses Certipy to find misconfigured templates that allow for privilege escalation.
 
 ---
 
