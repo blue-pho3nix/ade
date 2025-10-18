@@ -5,10 +5,10 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 <img width="2116" height="847" alt="image" src="https://github.com/user-attachments/assets/67889c87-bcf1-4759-a05f-7202b3036b1d" />
 
 **Kerberos Example**
-<img width="2402" height="1087" alt="image" src="https://github.com/user-attachments/assets/35abddba-b5c4-4080-99a9-ef939737d804" />
+<img width="2127" height="1073" alt="image" src="https://github.com/user-attachments/assets/b17a4c17-7944-4254-89a1-ff36c62d45e3" />
 
 **No Credentials Example**
-<img width="2142" height="788" alt="image" src="https://github.com/user-attachments/assets/e0798f22-ebc4-4b64-adb7-757232673f6b" />
+<img width="2148" height="1146" alt="image" src="https://github.com/user-attachments/assets/d5295138-d22f-4ccf-98df-ab7703486ee6" />
 
 
 ## Key Actions
