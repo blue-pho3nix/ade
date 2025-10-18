@@ -11,9 +11,9 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 <img width="2148" height="1146" alt="image" src="https://github.com/user-attachments/assets/d5295138-d22f-4ccf-98df-ab7703486ee6" />
 
 
-## Key Actions
+## Key Features
 ### Initial Discovery & Host Setup
-- **Host Liveness Check:** Pings the target with nmap before starting to ensure the IP is correct and the host is online.
+- **Target Alive Checks:** Pings the target with nmap before starting to ensure the IP is correct and the host is online.
 - **/etc/hosts Management:** Discovers the target's FQDN and domain, then maps them in /etc/hosts for name resolution.
 - **Credential Validation:** Checks if supplied credentials are valid before launching deeper scans to avoid failed authenticated runs.
 - **User & description enumeration:** Collects sAMAccountName and description attributes via LDAP, and uses SMB-based RID cycling as a fallback to find accounts that LDAP queries might not return
