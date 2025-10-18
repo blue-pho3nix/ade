@@ -62,7 +62,7 @@ sudo apt update && sudo apt install nmap
 
 1.
 ```
-sudo apt update && sudo apt install pipx git nmap 
+sudo apt update && sudo apt install pipx git
 ```
 2.
 ```
