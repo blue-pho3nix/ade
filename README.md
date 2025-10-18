@@ -1,6 +1,6 @@
 # ADE
 ADE is a Python script that automates Active Directory (AD) enumeration in lab environments, helping users on Hack The Box, Hack Smarter, TryHackMe, Proving Grounds, or exams like OSCP and CPTS streamline initial AD recon.
-> NOTE: </br> 
+
 > Wait at least 5 minutes after starting your lab before running the script to make sure `nxc --shares` works. 
 > </br> This is because some labs take longer to start up.
 
