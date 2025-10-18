@@ -97,3 +97,11 @@ python ade.py -r <box-ip> -u <user> -p <password>
 ---
 
 > NOTE:  If you have any issues or requests, reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
+
+---
+
+## TODO
+- [ ] Beutify & reduce redunant printed messages
+- [ ] Get impacket-{tool}.py working for users that installed impacket via apt
+- [ ] Create usage videos
+- [ ] Etc...
