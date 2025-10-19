@@ -1,15 +1,7 @@
 # ADE
 ADE is a Python script that automates Active Directory (AD) enumeration in lab environments, helping users on Hack The Box, Hack Smarter, TryHackMe, Proving Grounds, or exams like OSCP and CPTS streamline initial AD recon.
 
-**Credentials Example**
 <img width="2116" height="847" alt="image" src="https://github.com/user-attachments/assets/67889c87-bcf1-4759-a05f-7202b3036b1d" />
-
-**Kerberos Example**
-<img width="2127" height="1073" alt="image" src="https://github.com/user-attachments/assets/b17a4c17-7944-4254-89a1-ff36c62d45e3" />
-
-**No Credentials Example**
-<img width="2148" height="1146" alt="image" src="https://github.com/user-attachments/assets/d5295138-d22f-4ccf-98df-ab7703486ee6" />
-
 
 ## Key Features
 ### Initial Discovery & Host Setup
@@ -100,7 +92,6 @@ python ade.py -r <box-ip> -u <user> -p <password>
 ---
 
 ## TODO
-- [ ] Clean up and streamline printed messages to reduce redundancy
 - [ ] Make sure impacket-{tool}.py works for users who installed Impacket via apt
 - [ ] Record usage/tutorial videos
 - [ ] Add additional improvements and features as needed
