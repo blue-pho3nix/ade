@@ -419,19 +419,9 @@ def domain_discovery(r):
     anon_user = ""
     anon_pass = ""
     nxc_list = ["nxc", "ldap", r, "-u", anon_user, "-p", anon_pass]
-    nxc_output, _ = run_command(nxc_list, "Get domain name via anonymous LDAP", capture_output=True, retry_on_invalid=True)
+    nxc_output, _ = run_command(nxc_list, "Get domain name via anonymous LDAP", capture_output=True)
 
     if nxc_output and nxc_output.strip():
-        print_status("[*] Received LDAP output (excerpt):")
-        for ln in nxc_output.splitlines()[:10]:
-            print_status(ln)
-            if needs_kerberos_rerun and (not u.strip() or not p.strip()):
-                print_status("[-] Kerberos authentication requires valid credentials (-u and -p).")
-                print_status("[-] Please rerun with:")
-                print(colored("    python script.py -r <box-ip> -u <user> -p <password>", "yellow"))
-                sys.exit(1)
-
-
         match = re.search(r"\(name:(?P<name>[^)]+)\)\s*\(domain:(?P<domain>[^)]+)\)", nxc_output)
         if match:
             dc_name = match.group("name")
@@ -448,17 +438,15 @@ def domain_discovery(r):
     return discovered_domain, discovered_fqdn
 
 
-def verify_credentials(r, username, password, fqdn, domain, timeout=20):
+def verify_credentials(r, u, p):
     """
     Verify credentials via SMB authentication check.
     
     Args:
         r: Target IP address
-        username: Username to verify
-        password: Password to verify
-        fqdn: Not used (kept for compatibility)
-        domain: Not used (kept for compatibility)
-        timeout: Not used (kept for compatibility)
+        u: Username to verify
+        p: Password to verify
+        k: kerberos
     
     Returns:
         str: Status of credential verification
@@ -476,39 +464,69 @@ def verify_credentials(r, username, password, fqdn, domain, timeout=20):
         - Empty or unclear output → "ambiguous"
     """
 
+    ldap_art = r"""Credentials Check
+* ***  **   **** 
+ *   *   *      *
+      *   *      
+        *        
+          *     *
+*     *  *  *  * 
+   *             
+  * **        *  
+                 
+                 
+             *   
+ *     *         """
 
-    if not username or not password:
-        return "no-creds"
+    print_header(ldap_art)
 
-    print_status("\n[*] Verifying provided credentials before continuing...")
+    if u and p:
+        print_status("\n[*] Verifying credentials and initializing kerberos check...")
+        auth_opts = ["-u", u, "-p", p]
+    else:
+        print_status("\n[*] Checking for kerberos authentication...")
+        auth_opts = ["-u", "", "-p", ""]
 
-    # Fallback: run nxc smb check (silent)
+    # Run nxc smb check (silent)
     try:
-        smb_cmd = ["nxc", "smb", r, "-u", username, "-p", password, "--shares"]
+        smb_cmd = ["nxc", "smb", r, "--shares"] + auth_opts
         result = subprocess.run(smb_cmd, capture_output=True, text=True, check=False)
         text = (result.stdout + result.stderr).strip()
-        
-        if "STATUS_NOT_SUPPORTED" in text:
+
+        # Kerberos / negotiation hints in SMB output
+        if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
             kerberos_art = r"""888  /                    888                                        
 888 /     e88~~8e  888-~\ 888-~88e   e88~~8e  888-~\  e88~-_   d88~\ 
 888/\    d888  88b 888    888  888b d888  88b 888    d888   i C888   
 888  \   8888__888 888    888  8888 8888__888 888    8888   |  Y88b  
 888   \  Y888    , 888    888  888P Y888    , 888    Y888   '   888D 
 888    \  "88___/  888    888-_88"   "88___/  888     "88_-~  \_88P  
-                                                                     """
-            
+                                                                        """
+                
             detected_art = r"""888~-_               d8                       d8                   888 
 888   \   e88~~8e  _d88__  e88~~8e   e88~~\ _d88__  e88~~8e   e88~\888 
 888    | d888  88b  888   d888  88b d888     888   d888  88b d888  888 
 888    | 8888__888  888   8888__888 8888     888   8888__888 8888  888 
 888   /  Y888    ,  888   Y888    , Y888     888   Y888    , Y888  888 
 888_-~    "88___/   "88_/  "88___/   "88__/  "88_/  "88___/   "88_/888 
-                                                                       """
+                                                                        """
 
             print_header(f"{kerberos_art}")
             print_header(f"{detected_art}")
-            print_status("\n[!] Kerberos Detected: STATUS_NOT_SUPPORTED in anonymous LDAP check.")
-            needs_rerun_from_creds = True
+            if not u.strip() or not p.strip():
+                print_status("[-] Kerberos authentication requires valid credentials (-u and -p).")
+                print_status("[-] Please rerun with:")
+                print(colored("    python script.py -r <box-ip> -u <user> -p <password>", "yellow"))
+                sys.exit(1)
+            else:    
+                needs_rerun_from_creds = True
+                return "kerberos"
+
+        if not u or not p:
+            print_status("[*] Kerberos not detected...")
+            print_status("[-] No username and/or password detected... moving on with anonymous checks")
+            return "no-creds"
+
         if not text:
             print_status("[-] No output from nxc smb probe; treating as ambiguous.")
             return "ambiguous"
@@ -523,12 +541,6 @@ def verify_credentials(r, username, password, fqdn, domain, timeout=20):
             print_status("[+] Credentials validated (SMB authentication succeeded).")
             return "ok"
 
-        # Kerberos / negotiation hints in SMB output
-        if re.search(r'STATUS_NOT_SUPPORTED|KDC_ERR|SPNEGO|NTLM negotiation failed', text, re.IGNORECASE):
-            print_status("[+] Kerberos/negotiation detected in SMB output.")
-            return "kerberos"
-
-        
         # ambiguous but non-empty output - show why
         print_status("[!] Credential verification returned ambiguous result.")
         print_status("[!] Reason: Output contained no clear success or failure indicators")
@@ -1005,7 +1017,7 @@ def _line_matches(line: str) -> bool:
             return True
     return False
 
-def try_user_user_file(file_path, target, note="Try user:user", timeout=30):
+def try_user_file(file_path, target, note="Try user:user", timeout=30):
     """
     Perform user:user password spray attack using usernames from a file.
     
@@ -1146,7 +1158,7 @@ def user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
                 print_status(f"\n[INFO] '{USERS_FILE}' not found — skipping AS-REP Roasting.")
             
             # This return was causing your password spray to be skipped for authenticated users.
-            # It should be removed if you want the subsequent 'try_user_user_file' call to run.
+            # It should be removed if you want the subsequent 'try_user_file' call to run.
             # For now, keeping it as you had it:
             return
 
@@ -1160,7 +1172,7 @@ def user_spraying(r, d, u=None, p=None, k=False, cred_status=None):
     run_command(cmd_str, "Find users with Kerberos pre-auth disabled", is_shell_command=True)
 
     # Try users in users.txt
-    try_user_user_file(USERS_FILE, r, note="Attempt user:user")
+    try_user_file(USERS_FILE, r, note="Attempt user:user")
 
 
 def kerberoasting(r, f, d, u, p, k):
@@ -1409,16 +1421,14 @@ def main():
                 args.fqdn = discovered_fqdn
             
         if not args.kerberos:
-            # If creds provided, run Kerberos-first verification NOW (this sets args.kerberos when needed)
             cred_status = "no-creds"
             needs_rerun_from_creds = False
+            cred_status = verify_credentials(args.rhosts, args.username, args.password)
             if args.username and args.password:
-                cred_status = verify_credentials(args.rhosts, args.username, args.password, args.kerberos, args.fqdn, args.domain)
                 if cred_status == "kerberos":
                     needs_rerun_from_creds = True
-                    print_status("[+] Credential verification indicates Kerberos required.")
                 elif cred_status == "bad":
-                    print_status("\n[-] Stopping: invalid credentials supplied. Fix credentials or rerun without them to continue anonymous checks.")
+                    print_status("\n[-] Stopping: invalid credentials supplied. \n[-] Fix credentials or rerun without them to continue anonymous checks.")
                     sys.exit(1)
                 elif cred_status == "ambiguous":
                     print_status("\n[!] Credential verification ambiguous — proceeding but be cautious; you can rerun without creds for anonymous checks.")
@@ -1426,7 +1436,6 @@ def main():
             # Check required Kerberos and we're not already in Kerberos mode, restart
             if needs_rerun_from_creds and not args.kerberos and args.username and args.password:
                 args.kerberos = True
-                print_status("\n[+] Kerberos-only environment detected.")
                 print_status("[*] Restarting enumeration with Kerberos enabled.")
                 run_authenticated_checks = True
                 continue 
@@ -1454,10 +1463,9 @@ def main():
             )
 
             if rerun_kerberos and not args.kerberos:
-                print_status("\n[!] NTLM negotiation failed. Switching to Kerberos for all subsequent commands.")
                 args.kerberos = True
                 run_authenticated_checks = True
-                print_status("[*] RESTARTING ENUMERATION WITH KERBEROS ENABLED [*]")
+                print_status("[*] Restarting Enumeration with Kerberos Enabled")
                 continue
 
             # Continue with remaining authenticated tasks
@@ -1465,7 +1473,20 @@ def main():
             bloodyad(args.rhosts, args.username, args.password, args.kerberos, args.domain, args.fqdn)
             adcs_certipy(args.rhosts, args.fqdn, args.domain, args.username, args.password, args.kerberos)
 
-    print_status("\n[+] Enumeration script finished.\n")
+    finish_art = r"""Enumeration Finished :)
+*   * * *   ** * *** * 
+ * * *   **   *        
+  *    *        *      
+      *                
+                *      
+       *               
+  **               *   
+**  *     *   *   *  * 
+         *  *         *
+                       
+                 *   **
+     *  *    * *       """
+    print_header(f"\n{finish_art}\n")
 
 if __name__ == "__main__":
     main()
