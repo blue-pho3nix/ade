@@ -92,7 +92,7 @@ python ade.py -r <box-ip> -u <user> -p <password>
 ---
 
 ## TODO
-- [ ] Make sure impacket-{tool}.py works for users who installed Impacket via apt
+- [ ] Make sure impacket-{tool} works for users who installed Impacket via apt
 - [ ] Record usage/tutorial videos
 - [ ] Add additional improvements and features as needed
 
