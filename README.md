@@ -72,6 +72,7 @@ pipx install bloodhound-ce
 ```
 
 ## Usage
+> [!TIP]
 > Wait at least 5 minutes after starting your lab before running the script to make sure `nxc --shares` works. 
 > </br> This is because some labs take longer to start up.
 
@@ -87,7 +88,8 @@ python ade.py -r <box-ip> -u <user> -p <password>
 
 ---
 
-> NOTE:  If you have any issues or requests, reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
+> [!NOTE]
+> If you have any issues or requests, reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
 
 ---
 
