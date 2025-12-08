@@ -18,7 +18,7 @@ tools = [
     "certipy-ad @ git+https://github.com/ly4k/Certipy.git",
     "bloodyad @ git+https://github.com/CravateRouge/bloodyAD.git",
     "bloodhound-ce",
-    "impacket",
+    "impacket @ git+https://github.com/fortra/impacket.git",
 ]
 
 [project.scripts]
