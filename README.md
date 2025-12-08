@@ -67,6 +67,11 @@ ade -r <box-ip> -u <user> -p <password>
 > If you have any issues or requests, reach out on [Discord](https://discord.gg/TujAjYXJjr) (Blue Pho3nix).
 
 ---
+## Thank You
+
+[Schlop](https://www.youtube.com/@Schlopz) made the script available as a `pipx`-installable package.
+
+---
 
 ## TODO
 - [ ] Make sure impacket-{tool} works for users who installed Impacket via apt
