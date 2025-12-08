@@ -3,6 +3,21 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 
 <img width="2116" height="847" alt="image" src="https://github.com/user-attachments/assets/67889c87-bcf1-4759-a05f-7202b3036b1d" />
 
+## Installation
+
+```
+pix install git+'https://github.com/blue-pho3nix/ade'
+```
+
+This install the dependecies automatically using pipx. The dependecies for the script are certipy-ad, netexec, bloodhound-ce, bloodyad, and impacket. 
+
+### Uninstall apt Impacket
+You may need to uninstall the apt version of impacket to not get any conflicts with the pipx version of it.
+
+```
+sudo apt uninstall impacket-scripts
+```
+
 ## Key Features
 ### Initial Discovery & Host Setup
 - **Target Alive Checks:** Pings the target with nmap before starting to ensure the IP is correct and the host is online.
@@ -23,53 +38,6 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 - **BloodHound Collection:** Executes the BloodHound data collector, automatically retrying on failure, and outputs a ZIP that can be imported into BloodHound.
 - **Permission Checks:** Scans Active Directory with bloodyAD to find items your credentials can change (like user accounts or groups).
 - **ADCS Checks:** Probes for Active Directory Certificate Services and then uses Certipy to find misconfigured templates that allow for privilege escalation.
-
----
-
-## Install Dependencies
-
-### Install [termcolor](https://pypi.org/project/termcolor/)
-
-```
-sudo apt update && sudo apt install python3-termcolor
-```
-#### OR
-**Step 1:** Create virutal environment 
-```
-python3 -m venv ade-venv
-```
-**Step 2:** Activate the virtual environment
-```
-source ade-venv/bin/activate
-```
-**Step 3:** Install the required Python package
-```
-python3 -m pip install termcolor
-```
-### Install [Nmap](https://nmap.org/)
-
-```
-sudo apt update && sudo apt install nmap
-```
-
-### Install [Certipy](https://github.com/ly4k/Certipy), [Impacket](https://github.com/fortra/impacket), [bloodyAD](https://github.com/CravateRouge/bloodyAD), [NetExec](https://github.com/Pennyw0rth/NetExec),  [bloodhound-ce](http://github.com/dirkjanm/BloodHound.py)
-
-**Step 1:** Install `pipx` and `git`
-```
-sudo apt update && sudo apt install pipx git
-```
-**Step 2:** Ensure `pipx` is on your PATH
-```
-pipx ensurepath
-```
-**Step 3:** Install dependencies with `pipx`
-```
-pipx install certipy-ad
-pipx install impacket
-pipx install bloodyAD
-pipx install git+https://github.com/Pennyw0rth/NetExec
-pipx install bloodhound-ce
-```
 
 ## Usage
 > [!TIP]
