@@ -7,7 +7,7 @@ name = "ade"
 version = "1.0.0"
 description = "Active Directory Enumeration Script"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dependencies = [
     "termcolor>=2.0.1",
     "netexec @ git+https://github.com/Pennyw0rth/NetExec",
