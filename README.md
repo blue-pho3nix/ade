@@ -21,9 +21,6 @@ pipx uninstall ade
 ## Dependencies
 The dependecies for the script are [certipy-ad](https://github.com/ly4k/Certipy), [netexec](https://github.com/Pennyw0rth/NetExec), [bloodhound-ce](), [bloodyAD](https://github.com/CravateRouge/bloodyAD), and [Impacket](https://github.com/fortra/impacket)
 
-```
-sudo apt remove impacket-scripts
-```
 
 ## Key Features
 ### Initial Discovery & Host Setup
@@ -74,7 +71,6 @@ ade -r <box-ip> -u <user> -p <password>
 ---
 
 ## TODO
-- [ ] Make sure impacket-{tool} works for users who installed Impacket via apt
 - [ ] Record usage/tutorial videos
 - [ ] Add additional improvements and features as needed
 
