@@ -7,6 +7,7 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 
 ```
 git clone https://github.com/blue-pho3nix/ade.git
+cd ade
 sudo apt install git && sudo apt install pipx 
 pipx ensurepath
 ./install.sh
