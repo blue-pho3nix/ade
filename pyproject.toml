@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "termcolor>=2.0.1",
-    "netexec @ git+https://github.com/byt3bl33d3r/NetExec.git",
+    "netexec @ git+https://github.com/Pennyw0rth/NetExec",
     "certipy-ad @ git+https://github.com/ly4k/Certipy.git",
     "bloodyad @ git+https://github.com/CravateRouge/bloodyAD.git",
     "bloodhound-ce", 
