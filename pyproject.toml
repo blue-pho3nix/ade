@@ -13,7 +13,7 @@ dependencies = [
     "netexec @ git+https://github.com/Pennyw0rth/NetExec",
     "certipy-ad @ git+https://github.com/ly4k/Certipy.git",
     "bloodyad @ git+https://github.com/CravateRouge/bloodyAD.git",
-    "bloodhound-ce", 
+    "bloodhound-ce-python @ git+https://github.com/fox-it/BloodHoundCE.git", 
     "impacket @ git+https://github.com/fortra/impacket.git"
 ]
 
