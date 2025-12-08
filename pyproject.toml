@@ -16,8 +16,8 @@ dependencies = [
 tools = [
     "netexec",
     "certipy-ad",
-    "bloodhound-ce",
-    "bloodyad",
+    "bloodhound-ce-python",
+    "bloodyAD",
     "impacket",
 ]
 
