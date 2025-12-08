@@ -17,13 +17,15 @@ install_if_missing() {
     local install_command=$3
     local logfile="/tmp/ade_install_${package}.log"
     
-    # Check if binary exists in PATH first
-    if command -v "$binary" &>/dev/null; then
-        echo -e "${GREEN}✓ $package is already installed (found $binary in PATH), skipping...${NC}"
-        return 0
+    # Special handling for netexec - check PATH first
+    if [ "$package" == "netexec" ]; then
+        if command -v "$binary" &>/dev/null; then
+            echo -e "${GREEN}✓ $package is already installed (found $binary in PATH), skipping...${NC}"
+            return 0
+        fi
     fi
     
-    # Check if installed via pipx
+    # For all packages, check if installed via pipx
     if pipx list 2>/dev/null | grep -q "package $package"; then
         echo -e "${GREEN}✓ $package is already installed via pipx, skipping...${NC}"
         return 0
@@ -54,16 +56,16 @@ declare -A pids
 install_if_missing "netexec" "nxc" "pipx install git+https://github.com/Pennyw0rth/NetExec" &
 pids[netexec]=$!
 
-install_if_missing "certipy-ad" "certipy-ad" "pipx install certipy-ad" &
+install_if_missing "certipy-ad" "certipy" "pipx install certipy-ad" &
 pids[certipy-ad]=$!
 
 install_if_missing "bloodhound-ce" "bloodhound-ce-python" "pipx install bloodhound-ce" &
 pids[bloodhound-ce]=$!
 
-install_if_missing "bloodyAD" "bloodyAD" "pipx install bloodyAD" &
+install_if_missing "bloodyad" "bloodyAD" "pipx install bloodyAD" &
 pids[bloodyAD]=$!
 
-install_if_missing "impacket" "impacket-smbserver" "pipx install impacket" &
+install_if_missing "impacket" "pipx install impacket" &
 pids[impacket]=$!
 
 # Wait for all background processes to complete
