@@ -6,16 +6,15 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 ## Installation
 
 ```
-pipx install git+'https://github.com/blue-pho3nix/ade.git#egg=ade[tools]'
+sudo apt install git && sudo apt install pipx 
+pipx ensurepath
+./install.sh
 ```
-
-### Uninstall apt Impacket
-You may need to uninstall the apt version of impacket to not get any conflicts with the pipx version of it.
 
 ## Uninstall ade
 
 ```
-pipx uninstall ade
+./uninstall.sh
 ```
 
 ## Dependencies
@@ -73,9 +72,3 @@ ade -r <box-ip> -u <user> -p <password>
 ## TODO
 - [ ] Record usage/tutorial videos
 - [ ] Add additional improvements and features as needed
-
- 
-
-
-
-
