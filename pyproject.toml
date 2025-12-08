@@ -8,6 +8,9 @@ version = "1.0.0"
 description = "Active Directory Enumeration Script"
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+    "termcolor>=2.0.1",
+]
 
 [project.optional-dependencies]
 tools = [
