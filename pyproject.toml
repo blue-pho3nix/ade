@@ -15,9 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 tools = [
     "netexec @ git+https://github.com/Pennyw0rth/NetExec",
-    "certipy-ad",
+    "certipy @ git+https://github.com/ly4k/Certipy.git",
+    "bloodyad @ git+https://github.com/CravateRouge/bloodyAD.git",
     "bloodhound-ce",
-    "bloodyAD",
     "impacket",
 ]
 
