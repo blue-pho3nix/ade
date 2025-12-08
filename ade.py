@@ -250,7 +250,7 @@ def check_dependencies():
                 if command:
                     print(colored(f"    {command}", "yellow"))
         
-        print_status("\n[!] Please also ensure all tools are in your system's PATH.\n[!] Review https://github.com/blue-pho3nix/ade for instructions.")
+        print_status("Make sure you use the install.sh script")
         sys.exit(1)
         
     print_status("[+] All dependencies found.")
