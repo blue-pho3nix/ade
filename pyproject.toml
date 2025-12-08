@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "termcolor>=2.0.1",
     "netexec @ git+https://github.com/Pennyw0rth/NetExec",
-    "certipy-ad @ git+https://github.com/ly4k/Certipy.git",
+    "certipy-ad",
     "bloodyAD",
     "bloodhound-ce",
     "impacket"
