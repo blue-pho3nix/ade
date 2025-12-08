@@ -19,7 +19,7 @@ pipx uninstall ade
 ```
 
 ## Dependencies
-The dependecies for the script are [certipy-ad](https://github.com/ly4k/Certipy), [netexec](https://github.com/Pennyw0rth/NetExec), [bloodhound-ce](), [bloodyAD](https://github.com/CravateRouge/bloodyAD), and [Impacket](https://github.com/fortra/impacket)
+The dependecies for the script are [certipy-ad](https://github.com/ly4k/Certipy), [netexec](https://github.com/Pennyw0rth/NetExec), [bloodhound-ce](https://github.com/dirkjanm/), [bloodyAD](https://github.com/CravateRouge/bloodyAD), and [Impacket](https://github.com/fortra/impacket)
 
 
 ## Key Features
