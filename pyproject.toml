@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ade"
+version = "1.0.0"
+description = "Active Directory Enumeration Script"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "termcolor",
+]
+
+[project.optional-dependencies]
+tools = [
+    "netexec",
+    "certipy-ad",
+    "bloodhound-ce",
+    "bloodyad",
+    "impacket",
+]
+
+[project.scripts]
+ade = "ade:main"
