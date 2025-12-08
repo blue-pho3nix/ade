@@ -6,13 +6,20 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 ## Installation
 
 ```
-pix install git+'https://github.com/blue-pho3nix/ade'
+pipx install 'git+https://github.com/schlopshow/ade.git[tools]'
 ```
-
-This install the dependecies automatically using pipx. The dependecies for the script are certipy-ad, netexec, bloodhound-ce, bloodyad, and impacket. 
 
 ### Uninstall apt Impacket
 You may need to uninstall the apt version of impacket to not get any conflicts with the pipx version of it.
+
+## Uninstall ade
+
+```
+pipx uninstall ade
+```
+
+## Dependencies
+The dependecies for the script are [certipy-ad](https://github.com/ly4k/Certipy), [netexec](https://github.com/Pennyw0rth/NetExec), [bloodhound-ce](), [bloodyAD](https://github.com/CravateRouge/bloodyAD), and [Impacket](https://github.com/fortra/impacket)
 
 ```
 sudo apt uninstall impacket-scripts
@@ -46,12 +53,12 @@ sudo apt uninstall impacket-scripts
 
 Without credentials (anonymous/guest checks):
 ```
-python3 ade.py -r <box-ip>
+ade -r <box-ip>
 ```
 
 With credentials (authenticated checks):
 ```
-python ade.py -r <box-ip> -u <user> -p <password> 
+ade -r <box-ip> -u <user> -p <password> 
 ```
 
 ---
