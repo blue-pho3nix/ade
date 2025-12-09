@@ -47,7 +47,7 @@ install_package "bloodhound-ce" "pipx install bloodhound-ce" &
 # Wait for all background jobs
 wait
 echo ""
-echo "${BLUE}Installing ADE${NC}"
+echo -e "${BLUE}Installing ADE${NC}"
 install_package "ade" "pipx install git+https://github.com/blue-pho3nix/ade.git"
 
 echo ""
