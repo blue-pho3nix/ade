@@ -3,13 +3,20 @@ ADE is a Python script that automates Active Directory (AD) enumeration in lab e
 
 ![](https://github.com/user-attachments/assets/2e6ef45a-6347-41f2-9681-63496ded9f12)
 
-**No Credentials Provided**
+## Examples 
 
-![ade](https://github.com/user-attachments/assets/95f34be4-796c-471a-a4c5-dd978c4287bb)
+### No Credentials Provided
 
-**Credentials Provided**
+![](https://github.com/user-attachments/assets/95f34be4-796c-471a-a4c5-dd978c4287bb)
 
-![ade](https://github.com/user-attachments/assets/ce921476-d4e6-4987-b265-5b884a8b5fae)
+### Credentials Provided
+
+![](https://github.com/user-attachments/assets/ce921476-d4e6-4987-b265-5b884a8b5fae)
+
+### Kerberos
+
+![](https://github.com/user-attachments/assets/0196e056-d4a0-48f2-bfb4-81f0140330ee)
+
 
 ## Installation
 
@@ -76,5 +83,4 @@ ade -r <box-ip> -u <user> -p <password>
 ---
 
 ## TODO
-- [ ] Record usage/tutorial videos
 - [ ] Add additional improvements and features as needed
