@@ -1,7 +1,7 @@
 # ADE
 ADE is a Python script that automates Active Directory (AD) enumeration in lab environments, helping users on Hack The Box, Hack Smarter, TryHackMe, Proving Grounds, or exams like OSCP and CPTS streamline initial AD recon.
 
-<img width="2116" height="847" alt="image" src="https://github.com/user-attachments/assets/67889c87-bcf1-4759-a05f-7202b3036b1d" />
+![](https://github.com/user-attachments/assets/2e6ef45a-6347-41f2-9681-63496ded9f12)
 
 ## Installation
 
