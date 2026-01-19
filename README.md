@@ -84,3 +84,4 @@ ade -r <box-ip> -u <user> -p <password>
 
 ## TODO
 - [ ] Add additional improvements and features as needed
+- [ ] Add AS-REP roastable accounts to request SPNs without authentication
