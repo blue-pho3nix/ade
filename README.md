@@ -74,7 +74,9 @@ ade -r <box-ip> -u <user> -p <password>
 ## Thank You
 
 [Schlop](https://github.com/schlopshow) made the script that installs ADE.
+
 [trewwwsec](https://github.com/trewwwsec) added the Password Policy Check and uv support and Python version handling to install script!
+
 ---
 
 > [!NOTE]
